@@ -105,6 +105,9 @@ const handleKeydown = (event) => {
   padding: 16px;
   box-shadow: 0 4px 20px rgba(0, 0, 0, 0.08);
   transition: all 0.3s ease;
+  box-sizing: border-box;
+  max-width: 100%;
+  overflow: hidden;
 }
 
 .input-area:hover {
@@ -162,20 +165,48 @@ const handleKeydown = (event) => {
   color: var(--text-primary, #2c3e50);
   font-size: 14px;
   line-height: 1.6;
-  resize: vertical;
+  resize: none;
   transition: all 0.3s ease;
   font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+  box-sizing: border-box;
+  overflow-y: auto;
+  overflow-x: hidden;
+  display: block;
 }
 
 .input-textarea:focus {
   outline: none;
   border-color: #667eea;
   background-color: rgba(255, 255, 255, 0.95);
-  box-shadow: 0 0 0 4px rgba(102, 126, 234, 0.1);
+  box-shadow: inset 0 0 0 1px #667eea, 0 0 0 2px rgba(102, 126, 234, 0.1);
 }
 
 .input-textarea::placeholder {
   color: var(--text-secondary, #a0aec0);
+}
+
+/* 输入框滚动条样式 */
+.input-textarea::-webkit-scrollbar {
+  width: 6px;
+}
+
+.input-textarea::-webkit-scrollbar-track {
+  background: transparent;
+  border-radius: 3px;
+}
+
+.input-textarea::-webkit-scrollbar-thumb {
+  background: rgba(102, 126, 234, 0.3);
+  border-radius: 3px;
+  transition: background 0.2s ease;
+}
+
+.input-textarea::-webkit-scrollbar-thumb:hover {
+  background: rgba(102, 126, 234, 0.5);
+}
+
+.input-textarea:hover {
+  overflow-y: auto;
 }
 
 .input-actions {
@@ -301,6 +332,15 @@ const handleKeydown = (event) => {
     background-color: rgba(40, 40, 40, 0.95);
   }
 
+  /* 深色模式输入框滚动条 */
+  .input-textarea::-webkit-scrollbar-thumb {
+    background: rgba(102, 126, 234, 0.4);
+  }
+
+  .input-textarea::-webkit-scrollbar-thumb:hover {
+    background: rgba(102, 126, 234, 0.6);
+  }
+
   .btn-clear {
     background: linear-gradient(135deg, #3a3a3a 0%, #2d2d2d 100%);
     color: var(--text-primary, #e0e0e0);
@@ -320,6 +360,11 @@ const handleKeydown = (event) => {
   .input-textarea {
     min-height: 70px;
     font-size: 14px;
+  }
+
+  /* 移动端输入框滚动条更细 */
+  .input-textarea::-webkit-scrollbar {
+    width: 4px;
   }
 
   .btn {
@@ -355,6 +400,10 @@ const handleKeydown = (event) => {
   .language-badge {
     padding: 4px 8px;
     font-size: 11px;
+  }
+
+  .input-header {
+    margin-bottom: 4px;
   }
 }
 </style>
