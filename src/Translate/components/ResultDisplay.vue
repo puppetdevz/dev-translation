@@ -141,7 +141,7 @@ const handleRetry = () => {
   flex-direction: column;
   align-items: center;
   justify-content: center;
-  padding: 80px 20px;
+  padding: 40px 20px;
   color: var(--text-secondary, #8492a6);
 }
 
@@ -190,13 +190,13 @@ const handleRetry = () => {
   flex-direction: column;
   align-items: center;
   justify-content: center;
-  padding: 80px 20px;
+  padding: 40px 20px;
   text-align: center;
 }
 
 .error-icon {
-  font-size: 64px;
-  margin-bottom: 20px;
+  font-size: 48px;
+  margin-bottom: 16px;
   filter: drop-shadow(0 4px 8px rgba(245, 108, 108, 0.3));
 }
 
@@ -238,14 +238,14 @@ const handleRetry = () => {
   flex-direction: column;
   align-items: center;
   justify-content: center;
-  padding: 80px 20px;
+  padding: 40px 20px;
   color: var(--text-secondary, #a0aec0);
   text-align: center;
 }
 
 .empty-icon {
-  font-size: 64px;
-  margin-bottom: 20px;
+  font-size: 48px;
+  margin-bottom: 16px;
   opacity: 0.6;
   filter: drop-shadow(0 4px 8px rgba(0, 0, 0, 0.1));
 }
@@ -259,15 +259,15 @@ const handleRetry = () => {
 .result-grid {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
-  gap: 20px;
+  gap: 16px;
   width: 100%;
 }
 
 .card {
   background: rgba(255, 255, 255, 0.9);
   backdrop-filter: blur(10px);
-  border-radius: 16px;
-  padding: 20px;
+  border-radius: 12px;
+  padding: 16px;
   box-shadow: 0 4px 20px rgba(0, 0, 0, 0.08);
   transition: all 0.3s ease;
   animation: fadeInUp 0.4s ease;
@@ -472,30 +472,105 @@ const handleRetry = () => {
 
 @media (max-width: 768px) {
   .result-grid {
-    gap: 16px;
+    gap: 12px;
   }
 
   .card {
-    padding: 16px;
+    padding: 12px;
   }
 
   .translation-text {
-    font-size: 18px;
+    font-size: 16px;
   }
 
   .phonetic-text {
-    font-size: 16px;
+    font-size: 15px;
+  }
+
+  .card-header h3 {
+    font-size: 15px;
+  }
+
+  .card-icon {
+    font-size: 18px;
   }
 
   .loading-state,
   .error-state,
   .empty-state {
-    padding: 60px 20px;
+    padding: 30px 16px;
   }
 
   .empty-icon,
   .error-icon {
-    font-size: 48px;
+    font-size: 36px;
+  }
+}
+
+/* 小窗口优化 */
+@media (max-height: 600px) {
+  .result-grid {
+    gap: 12px;
+  }
+
+  .card {
+    padding: 12px;
+    border-radius: 10px;
+  }
+
+  .card-header {
+    margin-bottom: 12px;
+  }
+
+  .card-header h3 {
+    font-size: 14px;
+  }
+
+  .card-icon {
+    font-size: 16px;
+  }
+
+  .translation-text {
+    font-size: 15px;
+  }
+
+  .phonetic-text {
+    font-size: 14px;
+  }
+
+  .definition-list li,
+  .example-list li {
+    font-size: 13px;
+  }
+
+  .loading-state,
+  .error-state,
+  .empty-state {
+    padding: 20px 16px;
+  }
+
+  .empty-icon,
+  .error-icon {
+    font-size: 32px;
+  }
+}
+
+/* 超小窗口优化 */
+@media (max-height: 400px) {
+  .result-grid {
+    gap: 10px;
+  }
+
+  .card {
+    padding: 10px;
+  }
+
+  .translation-text {
+    font-size: 14px;
+  }
+
+  .phonetic-text {
+    font-size: 13px;
   }
 }
 </style>

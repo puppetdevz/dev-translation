@@ -98,11 +98,11 @@ const handleKeydown = (event) => {
 .input-area {
   display: flex;
   flex-direction: column;
-  gap: 16px;
+  gap: 12px;
   background: rgba(255, 255, 255, 0.9);
   backdrop-filter: blur(10px);
-  border-radius: 16px;
-  padding: 20px;
+  border-radius: 14px;
+  padding: 16px;
   box-shadow: 0 4px 20px rgba(0, 0, 0, 0.08);
   transition: all 0.3s ease;
 }
@@ -153,15 +153,15 @@ const handleKeydown = (event) => {
 
 .input-textarea {
   width: 100%;
-  min-height: 140px;
-  max-height: 400px;
-  padding: 16px;
+  min-height: 80px;
+  max-height: 200px;
+  padding: 12px;
   border: 2px solid transparent;
   border-radius: 12px;
   background-color: rgba(248, 250, 252, 0.8);
   color: var(--text-primary, #2c3e50);
-  font-size: 15px;
-  line-height: 1.7;
+  font-size: 14px;
+  line-height: 1.6;
   resize: vertical;
   transition: all 0.3s ease;
   font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
@@ -313,23 +313,48 @@ const handleKeydown = (event) => {
 
 @media (max-width: 768px) {
   .input-area {
-    padding: 16px;
-    gap: 12px;
+    padding: 12px;
+    gap: 10px;
   }
 
   .input-textarea {
-    min-height: 120px;
+    min-height: 70px;
     font-size: 14px;
   }
 
   .btn {
-    padding: 8px 18px;
+    padding: 8px 16px;
     font-size: 13px;
   }
 
   .language-badge {
-    padding: 5px 12px;
+    padding: 4px 10px;
+    font-size: 12px;
+  }
+}
+
+/* 小窗口优化 */
+@media (max-height: 600px) {
+  .input-area {
+    padding: 10px;
+    gap: 8px;
+  }
+
+  .input-textarea {
+    min-height: 60px;
+    max-height: 120px;
+    padding: 10px;
     font-size: 13px;
+  }
+
+  .btn {
+    padding: 6px 14px;
+    font-size: 12px;
+  }
+
+  .language-badge {
+    padding: 4px 8px;
+    font-size: 11px;
   }
 }
 </style>

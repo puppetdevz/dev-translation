@@ -228,25 +228,25 @@ watch(() => props.enterAction, (action) => {
 }
 
 .translate-header {
-  padding: 24px 32px;
+  padding: 16px 24px;
   background: rgba(255, 255, 255, 0.8);
   backdrop-filter: blur(10px);
   border-bottom: 1px solid rgba(0, 0, 0, 0.06);
 }
 
 .translate-title {
-  font-size: 28px;
+  font-size: 24px;
   font-weight: 700;
   margin: 0;
   color: var(--text-primary, #2c3e50);
   display: flex;
   align-items: center;
-  gap: 12px;
+  gap: 10px;
   letter-spacing: -0.5px;
 }
 
 .title-icon {
-  font-size: 32px;
+  font-size: 28px;
   filter: drop-shadow(0 2px 4px rgba(0, 0, 0, 0.1));
 }
 
@@ -255,8 +255,8 @@ watch(() => props.enterAction, (action) => {
   display: flex;
   flex-direction: column;
   overflow: hidden;
-  padding: 24px 32px;
-  gap: 24px;
+  padding: 16px 24px;
+  gap: 16px;
 }
 
 .translate-input-section {
@@ -289,7 +289,7 @@ watch(() => props.enterAction, (action) => {
 }
 
 .translate-footer {
-  padding: 16px 32px;
+  padding: 12px 24px;
   background: rgba(255, 255, 255, 0.6);
   backdrop-filter: blur(10px);
   border-top: 1px solid rgba(0, 0, 0, 0.06);
@@ -327,24 +327,73 @@ watch(() => props.enterAction, (action) => {
 /* 响应式布局 */
 @media (max-width: 768px) {
   .translate-content {
-    padding: 16px;
-    gap: 16px;
+    padding: 12px 16px;
+    gap: 12px;
   }
 
   .translate-header {
-    padding: 16px 20px;
+    padding: 12px 16px;
   }
 
   .translate-title {
-    font-size: 24px;
+    font-size: 20px;
   }
 
   .title-icon {
-    font-size: 28px;
+    font-size: 24px;
   }
 
   .translate-footer {
-    padding: 12px 20px;
+    padding: 10px 16px;
+  }
+}
+
+/* 小窗口优化 */
+@media (max-height: 600px) {
+  .translate-header {
+    padding: 10px 16px;
+  }
+
+  .translate-title {
+    font-size: 18px;
+  }
+
+  .title-icon {
+    font-size: 20px;
+  }
+
+  .translate-content {
+    padding: 8px 16px;
+    gap: 10px;
+  }
+
+  .translate-footer {
+    padding: 8px 16px;
+  }
+
+  /* 隐藏快捷键提示以节省空间 */
+  .translate-footer {
+    display: none;
+  }
+}
+
+/* 超小窗口优化 */
+@media (max-height: 400px) {
+  .translate-header {
+    padding: 8px 12px;
+  }
+
+  .translate-title {
+    font-size: 16px;
+  }
+
+  .title-icon {
+    font-size: 18px;
+  }
+
+  .translate-content {
+    padding: 6px 12px;
+    gap: 8px;
   }
 }
 </style>
