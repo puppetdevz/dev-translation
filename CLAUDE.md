@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## 项目概述
 
-这是一个 uTools 插件项目，名为 "Dev Translation"（开发者翻译）。使用 Vue 3 + Vite 构建，提供文件读写和智能翻译等功能。
+这是一个 uTools 插件项目，名为 "Dev Translation"（开发者翻译）。使用 Vue 3 + Vite 构建，提供智能中英文互译功能，具备现代化的 UI 设计和流畅的用户体验。
 
 ## 技术栈
 
@@ -37,18 +37,18 @@ pnpm build
 ├── src/
 │   ├── main.js              # Vue 应用入口
 │   ├── App.vue              # 根组件（路由控制）
-│   ├── Hello/               # Hello 功能模块
-│   ├── Read/                # 读文件功能模块
-│   ├── Write/               # 写文件功能模块
-│   └── Translate/           # 翻译功能模块（新增）
+│   └── Translate/           # 翻译功能模块
 │       ├── index.vue        # 翻译主组件
 │       └── components/      # 翻译子组件
-│           ├── InputArea.vue
-│           ├── ResultDisplay.vue
-│           └── KeyboardShortcuts.vue
+│           ├── InputArea.vue           # 输入区域组件
+│           ├── ResultDisplay.vue       # 结果展示组件
+│           └── KeyboardShortcuts.vue   # 快捷键提示组件
+├── documents/               # 文档资源
+│   └── image.png           # 项目截图
 ├── index.html               # HTML 入口
 ├── vite.config.js           # Vite 配置
 ├── jsconfig.json            # JS 配置（包含 utools-api-types）
+├── CLAUDE.md                # 项目架构和开发指南
 └── TESTING.md               # 测试指南
 ```
 
@@ -65,25 +65,10 @@ pnpm build
 项目使用简单的条件渲染实现路由，而非 Vue Router：
 
 - `App.vue` 监听 `window.utools.onPluginEnter` 事件获取 `action.code`
-- 根据 `action.code` 渲染对应的功能组件（hello/read/write/translate）
+- 根据 `action.code` 渲染对应的功能组件（目前仅 translate）
 - 每个功能组件接收 `enterAction` prop，包含用户输入和上下文信息
 
-#### 3. 功能模块
-
-**Hello 模块** (`src/Hello/index.vue`):
-- 展示插件进入参数
-- 用于调试和演示
-
-**Read 模块** (`src/Read/index.vue`):
-- 支持两种方式读取文件：
-  1. 通过 uTools 文件匹配（拖拽文件到 uTools）
-  2. 通过 `utools.showOpenDialog` 手动选择文件
-- 使用 `window.services.readFile` 读取文件内容
-
-**Write 模块** (`src/Write/index.vue`):
-- 支持保存文本和图片到下载目录
-- 使用 `window.services.writeTextFile` 和 `window.services.writeImageFile`
-- 保存后自动在文件管理器中显示文件位置
+#### 3. 翻译功能模块
 
 **Translate 模块** (`src/Translate/index.vue`):
 - 智能中英文互译功能
@@ -91,18 +76,70 @@ pnpm build
 - 自动语言检测（基于正则表达式）
 - 支持关键词触发和文本选择触发
 - 显示翻译结果、音标、释义、例句
-- 子组件：
-  - `InputArea.vue`: 输入区域，支持语言检测指示器、字数统计
-  - `ResultDisplay.vue`: 结果展示，卡片式布局
-  - `KeyboardShortcuts.vue`: 快捷键提示
 
-#### 4. Node.js 能力注入
+**子组件架构**:
+
+1. **InputArea.vue** - 输入区域组件
+   - 语言检测徽章（带国旗图标 🇨🇳/🇺🇸）
+   - 实时字数统计（超过 4500 字符显示警告）
+   - 渐变背景和毛玻璃效果
+   - 按钮带图标和加载动画
+   - 点击波纹效果
+   - 支持 Enter 翻译、Shift+Enter 换行
+
+2. **ResultDisplay.vue** - 结果展示组件
+   - 响应式网格布局（CSS Grid）
+   - 翻译结果卡片（占据整行）
+   - 音标卡片和释义卡片（并排显示）
+   - 例句卡片（占据整行）
+   - 优雅的加载动画（三个跳动的圆点）
+   - 卡片悬停上浮效果
+   - 淡入动画
+   - 每个卡片带图标（📝/🔊/📖/💬）
+
+3. **KeyboardShortcuts.vue** - 快捷键提示组件
+   - 3D 按键效果
+   - 分隔线设计
+   - 悬停动画
+   - 简洁的快捷键显示
+
+#### 4. UI 设计系统
+
+**设计特点**:
+- **现代化风格**: 渐变色彩 (#667eea → #764ba2)、毛玻璃效果、柔和阴影
+- **流式布局**: CSS Grid 自适应网格、Flexbox 弹性布局、支持窗口拉伸
+- **响应式设计**:
+  - 大屏幕 (> 1024px): 网格布局，音标和释义并排
+  - 中等屏幕 (< 1024px): 单列布局
+  - 小屏幕 (< 768px): 优化间距和字体大小
+- **深色模式**: 完整的深色主题支持，自动适配系统主题
+- **动画效果**: 淡入、上浮、波纹、加载动画等
+
+**颜色系统**:
+```css
+/* 主色调 */
+--primary-gradient: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+
+/* 背景 */
+--bg-light: linear-gradient(135deg, #f5f7fa 0%, #ffffff 100%);
+--bg-dark: linear-gradient(135deg, #1a1a1a 0%, #2d2d2d 100%);
+
+/* 文本 */
+--text-primary-light: #2c3e50;
+--text-primary-dark: #e0e0e0;
+--text-secondary-light: #8492a6;
+--text-secondary-dark: #a0aec0;
+```
+
+#### 5. Node.js 能力注入
 
 `public/preload/services.js` 通过 preload 机制注入以下能力：
 
 - `readFile(file)`: 同步读取文件内容
 - `writeTextFile(text)`: 将文本写入下载目录
 - `writeImageFile(base64Url)`: 将 base64 图片写入下载目录
+
+注意：当前翻译功能不需要文件系统访问，这些能力为未来功能扩展预留。
 
 ## 开发注意事项
 
@@ -179,6 +216,36 @@ const detectLanguage = (text) => {
 - 提取花括号内容
 - 多层容错机制
 
+**UI 交互细节**：
+- 输入框聚焦时显示紫色边框和阴影
+- 按钮悬停时上浮 1-2px
+- 卡片悬停时上浮 4px 并增强阴影
+- 加载时显示三个跳动的圆点动画
+- 结果卡片淡入动画 (0.4s)
+- 语言徽章淡入缩放动画 (0.3s)
+
+**响应式布局实现**：
+```css
+/* 网格布局 - 自动适应 */
+.result-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+  gap: 20px;
+}
+
+/* 占据整行 */
+.full-width {
+  grid-column: 1 / -1;
+}
+
+/* 中等屏幕 - 单列 */
+@media (max-width: 1024px) {
+  .result-grid {
+    grid-template-columns: 1fr;
+  }
+}
+```
+
 ## 插件功能扩展
 
 添加新功能需要：
@@ -200,4 +267,35 @@ const detectLanguage = (text) => {
 - 语言自动检测
 - 错误处理
 - 深色模式适配
-- 快捷键功能
+- 快捷键功能（Enter 翻译、Shift+Enter 换行、Esc 关闭）
+- 响应式布局（窗口拉伸、不同屏幕尺寸）
+- UI 动画效果（加载、悬停、淡入等）
+- 复制功能
+
+## 性能优化
+
+- 使用 CSS Grid 和 Flexbox 实现高效布局
+- 动画使用 transform 和 opacity，避免触发重排
+- 组件按需加载
+- 合理使用 Vue 的响应式系统
+- 自定义滚动条样式优化
+
+## 未来扩展方向
+
+- 支持更多语言对（如日语、韩语等）
+- 添加翻译历史记录
+- 支持批量翻译
+- 添加发音功能
+- 支持自定义 AI 模型
+- 添加专业术语词典
+- 支持翻译结果导出
+
+## 开发建议
+
+1. **保持 UI 一致性**: 遵循现有的设计系统（颜色、间距、圆角、阴影等）
+2. **响应式优先**: 确保新功能在不同屏幕尺寸下都能正常工作
+3. **深色模式支持**: 所有新增样式都要考虑深色模式
+4. **动画流畅性**: 使用 transform 和 opacity，避免性能问题
+5. **错误处理**: 提供友好的错误提示和重试机制
+6. **代码组织**: 保持组件化，单一职责原则
+7. **注释规范**: 关键逻辑添加注释说明
