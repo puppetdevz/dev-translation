@@ -55,64 +55,43 @@ const handleRetry = () => {
 
     <!-- 结果展示 - 使用响应式网格布局 -->
     <div v-else-if="result" class="result-grid">
-      <!-- 翻译结果卡片 - 占据整行 -->
+      <!-- 翻译结果卡片 - 包含翻译和音标 -->
       <div class="card translation-card full-width">
-        <div class="card-header">
-          <div class="header-left">
-            <span class="card-icon">📝</span>
-            <h3>翻译结果</h3>
+        <div class="translation-main">
+          <div class="translation-content">
+            <p class="translation-text">{{ result.translation }}</p>
+            <p class="phonetic-text">{{ result.phonetic }}</p>
           </div>
           <button class="btn-copy" @click="copyText(result.translation)">
             <span class="copy-icon">📋</span>
-            <span>复制</span>
           </button>
         </div>
-        <div class="card-content">
-          <p class="translation-text">{{ result.translation }}</p>
-        </div>
       </div>
 
-      <!-- 音标卡片 -->
-      <div class="card phonetic-card">
-        <div class="card-header">
-          <div class="header-left">
-            <span class="card-icon">🔊</span>
-            <h3>音标</h3>
-          </div>
-        </div>
-        <div class="card-content">
-          <p class="phonetic-text">{{ result.phonetic }}</p>
-        </div>
-      </div>
-
-      <!-- 释义卡片 -->
+      <!-- 释义卡片 - 只显示前3个 -->
       <div class="card definition-card">
-        <div class="card-header">
-          <div class="header-left">
-            <span class="card-icon">📖</span>
-            <h3>释义</h3>
-          </div>
+        <div class="card-header compact">
+          <span class="card-icon">📖</span>
+          <h3>释义</h3>
         </div>
         <div class="card-content">
           <ol class="definition-list">
-            <li v-for="(def, index) in result.definitions" :key="index">
+            <li v-for="(def, index) in result.definitions.slice(0, 3)" :key="index">
               {{ def }}
             </li>
           </ol>
         </div>
       </div>
 
-      <!-- 例句卡片 - 占据整行 -->
-      <div class="card example-card full-width">
-        <div class="card-header">
-          <div class="header-left">
-            <span class="card-icon">💬</span>
-            <h3>例句</h3>
-          </div>
+      <!-- 例句卡片 - 只显示前2个 -->
+      <div class="card example-card">
+        <div class="card-header compact">
+          <span class="card-icon">💬</span>
+          <h3>例句</h3>
         </div>
         <div class="card-content">
           <ul class="example-list">
-            <li v-for="(example, index) in result.examples" :key="index">
+            <li v-for="(example, index) in result.examples.slice(0, 2)" :key="index">
               <span class="example-bullet">•</span>
               <span class="example-text">{{ example }}</span>
             </li>
@@ -141,19 +120,19 @@ const handleRetry = () => {
   flex-direction: column;
   align-items: center;
   justify-content: center;
-  padding: 40px 20px;
+  padding: 30px 20px;
   color: var(--text-secondary, #8492a6);
 }
 
 .loading-animation {
   display: flex;
-  gap: 12px;
-  margin-bottom: 24px;
+  gap: 8px;
+  margin-bottom: 16px;
 }
 
 .loading-circle {
-  width: 16px;
-  height: 16px;
+  width: 12px;
+  height: 12px;
   background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
   border-radius: 50%;
   animation: bounce 1.4s infinite ease-in-out both;
@@ -179,7 +158,7 @@ const handleRetry = () => {
 }
 
 .loading-text {
-  font-size: 15px;
+  font-size: 13px;
   font-weight: 500;
   margin: 0;
 }
@@ -190,46 +169,46 @@ const handleRetry = () => {
   flex-direction: column;
   align-items: center;
   justify-content: center;
-  padding: 40px 20px;
+  padding: 30px 20px;
   text-align: center;
 }
 
 .error-icon {
-  font-size: 48px;
-  margin-bottom: 16px;
+  font-size: 40px;
+  margin-bottom: 12px;
   filter: drop-shadow(0 4px 8px rgba(245, 108, 108, 0.3));
 }
 
 .error-message {
   color: #f56c6c;
-  margin-bottom: 24px;
-  font-size: 15px;
+  margin-bottom: 16px;
+  font-size: 13px;
   font-weight: 500;
 }
 
 .btn-retry {
   display: flex;
   align-items: center;
-  gap: 8px;
-  padding: 10px 24px;
+  gap: 6px;
+  padding: 8px 18px;
   border: none;
-  border-radius: 10px;
+  border-radius: 8px;
   background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
   color: white;
-  font-size: 14px;
+  font-size: 12px;
   font-weight: 600;
   cursor: pointer;
   transition: all 0.2s ease;
-  box-shadow: 0 4px 12px rgba(102, 126, 234, 0.4);
+  box-shadow: 0 3px 10px rgba(102, 126, 234, 0.4);
 }
 
 .btn-retry:hover {
-  transform: translateY(-2px);
-  box-shadow: 0 6px 16px rgba(102, 126, 234, 0.5);
+  transform: translateY(-1px);
+  box-shadow: 0 4px 12px rgba(102, 126, 234, 0.5);
 }
 
 .retry-icon {
-  font-size: 16px;
+  font-size: 14px;
 }
 
 /* 空状态 */
@@ -238,44 +217,44 @@ const handleRetry = () => {
   flex-direction: column;
   align-items: center;
   justify-content: center;
-  padding: 40px 20px;
+  padding: 30px 20px;
   color: var(--text-secondary, #a0aec0);
   text-align: center;
 }
 
 .empty-icon {
-  font-size: 48px;
-  margin-bottom: 16px;
+  font-size: 40px;
+  margin-bottom: 12px;
   opacity: 0.6;
   filter: drop-shadow(0 4px 8px rgba(0, 0, 0, 0.1));
 }
 
 .empty-text {
-  font-size: 15px;
+  font-size: 13px;
   margin: 0;
 }
 
 /* 响应式网格布局 */
 .result-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
-  gap: 16px;
+  grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+  gap: 10px;
   width: 100%;
 }
 
 .card {
   background: rgba(255, 255, 255, 0.9);
   backdrop-filter: blur(10px);
-  border-radius: 12px;
-  padding: 16px;
-  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.08);
+  border-radius: 10px;
+  padding: 12px;
+  box-shadow: 0 2px 12px rgba(0, 0, 0, 0.06);
   transition: all 0.3s ease;
   animation: fadeInUp 0.4s ease;
 }
 
 .card:hover {
-  transform: translateY(-4px);
-  box-shadow: 0 8px 28px rgba(0, 0, 0, 0.12);
+  transform: translateY(-2px);
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.1);
 }
 
 .full-width {
@@ -297,22 +276,27 @@ const handleRetry = () => {
   display: flex;
   justify-content: space-between;
   align-items: center;
-  margin-bottom: 16px;
+  margin-bottom: 10px;
+}
+
+.card-header.compact {
+  gap: 6px;
+  margin-bottom: 8px;
 }
 
 .header-left {
   display: flex;
   align-items: center;
-  gap: 10px;
+  gap: 6px;
 }
 
 .card-icon {
-  font-size: 20px;
+  font-size: 14px;
   filter: drop-shadow(0 2px 4px rgba(0, 0, 0, 0.1));
 }
 
 .card-header h3 {
-  font-size: 17px;
+  font-size: 13px;
   font-weight: 700;
   margin: 0;
   color: var(--text-primary, #2c3e50);
@@ -322,22 +306,22 @@ const handleRetry = () => {
 .btn-copy {
   display: flex;
   align-items: center;
-  gap: 6px;
-  padding: 6px 14px;
+  justify-content: center;
+  padding: 6px;
   border: none;
-  border-radius: 8px;
+  border-radius: 6px;
   background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
   color: white;
-  font-size: 13px;
-  font-weight: 600;
+  font-size: 14px;
   cursor: pointer;
   transition: all 0.2s ease;
-  box-shadow: 0 2px 8px rgba(102, 126, 234, 0.3);
+  box-shadow: 0 2px 6px rgba(102, 126, 234, 0.25);
+  flex-shrink: 0;
 }
 
 .btn-copy:hover {
   transform: translateY(-1px);
-  box-shadow: 0 4px 12px rgba(102, 126, 234, 0.4);
+  box-shadow: 0 3px 8px rgba(102, 126, 234, 0.35);
 }
 
 .copy-icon {
@@ -346,29 +330,36 @@ const handleRetry = () => {
 
 .card-content {
   color: var(--text-secondary, #4a5568);
-  line-height: 1.7;
+  line-height: 1.5;
 }
 
-/* 翻译结果卡片 */
+/* 翻译结果卡片 - 新布局 */
 .translation-card {
   background: linear-gradient(135deg, rgba(102, 126, 234, 0.05) 0%, rgba(118, 75, 162, 0.05) 100%);
 }
 
-.translation-text {
-  font-size: 20px;
-  font-weight: 600;
-  color: var(--text-primary, #2c3e50);
-  margin: 0;
-  line-height: 1.6;
+.translation-main {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 12px;
 }
 
-/* 音标卡片 */
-.phonetic-card {
-  background: linear-gradient(135deg, rgba(102, 126, 234, 0.03) 0%, rgba(118, 75, 162, 0.03) 100%);
+.translation-content {
+  flex: 1;
+  min-width: 0;
+}
+
+.translation-text {
+  font-size: 18px;
+  font-weight: 600;
+  color: var(--text-primary, #2c3e50);
+  margin: 0 0 6px 0;
+  line-height: 1.4;
 }
 
 .phonetic-text {
-  font-size: 18px;
+  font-size: 14px;
   font-family: 'Lucida Sans Unicode', 'Arial Unicode MS', sans-serif;
   color: #667eea;
   margin: 0;
@@ -382,14 +373,14 @@ const handleRetry = () => {
 
 .definition-list {
   margin: 0;
-  padding-left: 24px;
+  padding-left: 16px;
 }
 
 .definition-list li {
-  margin-bottom: 12px;
+  margin-bottom: 6px;
   color: var(--text-primary, #2c3e50);
-  font-size: 14px;
-  line-height: 1.6;
+  font-size: 12px;
+  line-height: 1.5;
 }
 
 .definition-list li:last-child {
@@ -409,11 +400,11 @@ const handleRetry = () => {
 
 .example-list li {
   display: flex;
-  gap: 12px;
-  margin-bottom: 16px;
+  gap: 6px;
+  margin-bottom: 8px;
   color: var(--text-primary, #2c3e50);
-  font-size: 14px;
-  line-height: 1.7;
+  font-size: 12px;
+  line-height: 1.5;
 }
 
 .example-list li:last-child {
@@ -422,7 +413,7 @@ const handleRetry = () => {
 
 .example-bullet {
   color: #667eea;
-  font-size: 20px;
+  font-size: 14px;
   font-weight: bold;
   flex-shrink: 0;
 }
@@ -472,11 +463,11 @@ const handleRetry = () => {
 
 @media (max-width: 768px) {
   .result-grid {
-    gap: 12px;
+    gap: 8px;
   }
 
   .card {
-    padding: 12px;
+    padding: 10px;
   }
 
   .translation-text {
@@ -484,63 +475,70 @@ const handleRetry = () => {
   }
 
   .phonetic-text {
-    font-size: 15px;
+    font-size: 13px;
   }
 
   .card-header h3 {
-    font-size: 15px;
+    font-size: 12px;
   }
 
   .card-icon {
-    font-size: 18px;
+    font-size: 13px;
+  }
+
+  .definition-list li,
+  .example-list li {
+    font-size: 11px;
   }
 
   .loading-state,
   .error-state,
   .empty-state {
-    padding: 30px 16px;
+    padding: 24px 16px;
   }
 
   .empty-icon,
   .error-icon {
-    font-size: 36px;
+    font-size: 32px;
   }
 }
 
 /* 小窗口优化 */
 @media (max-height: 600px) {
   .result-grid {
-    gap: 12px;
+    gap: 8px;
   }
 
   .card {
-    padding: 12px;
-    border-radius: 10px;
+    padding: 8px 10px;
+    border-radius: 8px;
   }
 
   .card-header {
-    margin-bottom: 12px;
+    margin-bottom: 6px;
   }
 
-  .card-header h3 {
-    font-size: 14px;
-  }
-
-  .card-icon {
-    font-size: 16px;
+  .card-header.compact {
+    margin-bottom: 6px;
   }
 
   .translation-text {
-    font-size: 15px;
+    font-size: 16px;
+    margin-bottom: 4px;
   }
 
   .phonetic-text {
-    font-size: 14px;
+    font-size: 12px;
   }
 
   .definition-list li,
   .example-list li {
-    font-size: 13px;
+    font-size: 11px;
+    margin-bottom: 4px;
+  }
+
+  .example-list li {
+    margin-bottom: 6px;
   }
 
   .loading-state,
@@ -551,26 +549,36 @@ const handleRetry = () => {
 
   .empty-icon,
   .error-icon {
-    font-size: 32px;
+    font-size: 28px;
   }
 }
 
 /* 超小窗口优化 */
 @media (max-height: 400px) {
   .result-grid {
-    gap: 10px;
+    gap: 6px;
   }
 
   .card {
-    padding: 10px;
+    padding: 6px 8px;
+  }
+
+  .card-header {
+    margin-bottom: 4px;
   }
 
   .translation-text {
-    font-size: 14px;
+    font-size: 15px;
+    margin-bottom: 3px;
   }
 
   .phonetic-text {
-    font-size: 13px;
+    font-size: 11px;
+  }
+
+  .definition-list li,
+  .example-list li {
+    font-size: 10px;
   }
 }
 </style>
