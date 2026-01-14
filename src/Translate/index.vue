@@ -3,6 +3,11 @@ import { ref, watch, nextTick } from 'vue'
 import InputArea from './components/InputArea.vue'
 import ResultDisplay from './components/ResultDisplay.vue'
 import KeyboardShortcuts from './components/KeyboardShortcuts.vue'
+import {
+  buildChineseToEnglishPrompt,
+  buildEnglishToChinesePrompt,
+  buildPolishPrompt
+} from './prompts/index.js'
 
 const props = defineProps({
   enterAction: {
@@ -29,54 +34,6 @@ const detectLanguage = (text) => {
   const chineseChars = text.match(/[\u4e00-\u9fa5]/g)
   const chineseRatio = chineseChars ? chineseChars.length / text.length : 0
   return chineseRatio > 0.3 ? 'zh' : 'en'
-}
-
-// 构建中译英 Prompt
-const buildChineseToEnglishPrompt = (text) => {
-  return `请将以下中文翻译成英文，并以JSON格式返回结果。
-
-要翻译的内容: ${text}
-
-请严格按照以下JSON格式返回:
-{
-  "translation": "英文翻译",
-  "phonetic": "美式音标(IPA格式)",
-  "definitions": ["英文释义1", "英文释义2", "英文释义3"],
-  "examples": ["英文例句1", "英文例句2", "英文例句3"]
-}
-
-要求:
-1. translation: 准确、地道的英文翻译
-2. phonetic: 使用国际音标(IPA)，美式发音，格式如 /ˈhɛloʊ/
-3. definitions: 提供3-5个英文释义，解释翻译结果的不同含义
-4. examples: 提供3-5个英文例句，展示翻译结果的实际用法
-5. 必须返回有效的JSON格式，不要添加任何其他文字
-
-直接返回JSON，不要使用markdown代码块。`
-}
-
-// 构建英译中 Prompt
-const buildEnglishToChinesePrompt = (text) => {
-  return `请将以下英文翻译成中文，并以JSON格式返回结果。
-
-要翻译的内容: ${text}
-
-请严格按照以下JSON格式返回:
-{
-  "translation": "中文翻译",
-  "phonetic": "英文原文的美式音标(IPA格式)",
-  "definitions": ["英文释义1", "英文释义2", "英文释义3"],
-  "examples": ["英文例句1", "英文例句2", "英文例句3"]
-}
-
-要求:
-1. translation: 准确、地道的中文翻译
-2. phonetic: 原英文的美式音标(IPA格式)，格式如 /ˈhɛloʊ/
-3. definitions: 提供3-5个英文释义(保持英文)，解释原文的不同含义
-4. examples: 提供3-5个英文例句(保持英文)，展示原文的实际用法
-5. 必须返回有效的JSON格式，不要添加任何其他文字
-
-直接返回JSON，不要使用markdown代码块。`
 }
 
 // 解析 AI 响应
@@ -153,25 +110,6 @@ const translate = async () => {
   } finally {
     isLoading.value = false
   }
-}
-
-// 构建润色 Prompt
-const buildPolishPrompt = (text, lang) => {
-  const langName = lang === 'zh' ? '中文' : '英文'
-
-  return `请对以下${langName}文本进行润色，以易于理解但保留适当专业性的风格重写。
-
-要润色的内容: ${text}
-
-要求:
-1. 保持原文的核心含义和专业性
-2. 使表达更清晰、流畅、易懂
-3. 改善语法和用词的准确性
-4. 保持适当的语气（正式/非正式根据原文判断）
-5. 仅返回润色后的文本，不要添加任何其他文字或解释
-6. 不要使用markdown代码块，直接返回纯文本
-
-直接返回润色后的文本。`
 }
 
 // 润色函数
