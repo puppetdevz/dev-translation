@@ -100,11 +100,8 @@ const handleRetry = () => {
       </div>
     </div>
 
-    <!-- 空状态 -->
-    <div v-else class="empty-state">
-      <div class="empty-icon">✍️</div>
-      <p class="empty-text">输入内容后点击翻译按钮开始翻译</p>
-    </div>
+    <!-- 空状态 - 保持空白 -->
+    <div v-else class="empty-state"></div>
   </div>
 </template>
 
@@ -211,27 +208,10 @@ const handleRetry = () => {
   font-size: 14px;
 }
 
-/* 空状态 */
+/* 空状态 - 保持空白 */
 .empty-state {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  justify-content: center;
-  padding: 30px 20px;
-  color: var(--text-secondary, #a0aec0);
-  text-align: center;
-}
-
-.empty-icon {
-  font-size: 40px;
-  margin-bottom: 12px;
-  opacity: 0.6;
-  filter: drop-shadow(0 4px 8px rgba(0, 0, 0, 0.1));
-}
-
-.empty-text {
-  font-size: 13px;
-  margin: 0;
+  width: 100%;
+  height: 100%;
 }
 
 /* 响应式网格布局 */
@@ -490,17 +470,6 @@ const handleRetry = () => {
   .example-list li {
     font-size: 11px;
   }
-
-  .loading-state,
-  .error-state,
-  .empty-state {
-    padding: 24px 16px;
-  }
-
-  .empty-icon,
-  .error-icon {
-    font-size: 32px;
-  }
 }
 
 /* 小窗口优化 */
@@ -539,17 +508,6 @@ const handleRetry = () => {
 
   .example-list li {
     margin-bottom: 6px;
-  }
-
-  .loading-state,
-  .error-state,
-  .empty-state {
-    padding: 20px 16px;
-  }
-
-  .empty-icon,
-  .error-icon {
-    font-size: 28px;
   }
 }
 
