@@ -6,7 +6,9 @@
       "WebSearch",
       "mcp__exa__web_search_exa",
       "mcp__sequential-thinking__sequentialthinking",
-      "Bash(pnpm dev:*)"
+      "Bash(pnpm dev:*)",
+      "Bash(git add:*)",
+      "Bash(git commit:*)"
     ]
   }
 }

@@ -1,5 +1,5 @@
 <script lang="ts" setup>
-import { computed } from 'vue'
+import { computed, ref, onMounted } from 'vue'
 
 const props = defineProps({
   modelValue: {
@@ -25,6 +25,16 @@ const props = defineProps({
 })
 
 const emit = defineEmits(['update:modelValue', 'translate', 'clear', 'polish', 'acceptPolish', 'rejectPolish'])
+
+// 输入框引用
+const textareaRef = ref(null)
+
+// 组件挂载后自动聚焦
+onMounted(() => {
+  if (textareaRef.value && !props.polishedText) {
+    textareaRef.value.focus()
+  }
+})
 
 const text = computed({
   get: () => props.modelValue,
@@ -76,16 +86,6 @@ const handleKeydown = (event) => {
 
 <template>
   <div class="input-area">
-    <div class="input-header">
-      <div class="language-badge" v-if="languageIndicator">
-        <span class="badge-icon">{{ detectedLanguage === 'zh' ? '🇨🇳' : '🇺🇸' }}</span>
-        <span class="badge-text">{{ languageIndicator }}</span>
-      </div>
-      <span class="char-count" :class="{ 'char-count-warning': charCount > 4500 }">
-        字符数: {{ charCount }}/5000
-      </span>
-    </div>
-
     <!-- 润色对比视图 -->
     <div v-if="polishedText" class="polish-comparison">
       <div class="comparison-panel">
@@ -107,12 +107,24 @@ const handleKeydown = (event) => {
     <!-- 普通输入框 -->
     <textarea
       v-else
+      ref="textareaRef"
       v-model="text"
       class="input-textarea"
       placeholder="请输入要翻译的内容..."
       maxlength="5000"
       @keydown="handleKeydown"
     />
+
+    <!-- 输入框下方的提示信息 -->
+    <div class="input-footer" v-if="!polishedText">
+      <div class="language-badge" v-if="languageIndicator">
+        <span class="badge-icon">{{ detectedLanguage === 'zh' ? '🇨🇳' : '🇺🇸' }}</span>
+        <span class="badge-text">{{ languageIndicator }}</span>
+      </div>
+      <span class="char-count" :class="{ 'char-count-warning': charCount > 4500 }">
+        字符数: {{ charCount }}/5000
+      </span>
+    </div>
 
     <div class="input-actions">
       <!-- 润色对比模式下的按钮 -->
@@ -170,11 +182,11 @@ const handleKeydown = (event) => {
 .input-area {
   display: flex;
   flex-direction: column;
-  gap: 12px;
+  gap: 8px;
   background: rgba(255, 255, 255, 0.9);
   backdrop-filter: blur(10px);
   border-radius: 14px;
-  padding: 16px;
+  padding: 14px;
   box-shadow: 0 4px 20px rgba(0, 0, 0, 0.08);
   transition: all 0.3s ease;
   box-sizing: border-box;
@@ -186,36 +198,37 @@ const handleKeydown = (event) => {
   box-shadow: 0 6px 24px rgba(0, 0, 0, 0.12);
 }
 
-.input-header {
+.input-footer {
   display: flex;
   justify-content: space-between;
   align-items: center;
+  gap: 8px;
 }
 
 .language-badge {
   display: flex;
   align-items: center;
-  gap: 8px;
-  padding: 6px 14px;
+  gap: 4px;
+  padding: 3px 8px;
   background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-  border-radius: 20px;
-  font-size: 14px;
+  border-radius: 12px;
+  font-size: 11px;
   font-weight: 600;
   color: white;
-  box-shadow: 0 2px 8px rgba(102, 126, 234, 0.3);
+  box-shadow: 0 1px 4px rgba(102, 126, 234, 0.3);
   animation: fadeIn 0.3s ease;
 }
 
 .badge-icon {
-  font-size: 16px;
+  font-size: 12px;
 }
 
 .badge-text {
-  letter-spacing: 0.5px;
+  letter-spacing: 0.3px;
 }
 
 .char-count {
-  font-size: 13px;
+  font-size: 11px;
   font-weight: 500;
   color: var(--text-secondary, #8492a6);
   transition: color 0.3s ease;
@@ -361,11 +374,11 @@ const handleKeydown = (event) => {
 .btn {
   display: flex;
   align-items: center;
-  gap: 8px;
-  padding: 10px 24px;
+  gap: 6px;
+  padding: 6px 16px;
   border: none;
-  border-radius: 10px;
-  font-size: 14px;
+  border-radius: 8px;
+  font-size: 12px;
   font-weight: 600;
   cursor: pointer;
   transition: all 0.2s ease;
