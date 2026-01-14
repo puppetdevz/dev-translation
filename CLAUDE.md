@@ -49,7 +49,13 @@ pnpm build
 │           ├── ResultDisplay.vue       # 结果展示组件
 │           └── KeyboardShortcuts.vue   # 快捷键提示组件
 ├── documents/               # 文档资源
-│   └── image.png           # 项目截图
+│   ├── image.png           # 项目截图
+│   ├── introduce.md        # 插件介绍文档
+│   └── updates/            # 版本更新文档
+│       └── 1.0.0.md        # 1.0.0 版本更新说明
+├── .claude/                 # Claude Code 配置
+│   └── skills/             # Claude Code Skills
+│       └── release.md      # 发布流程 Skill
 ├── index.html               # HTML 入口
 ├── vite.config.js           # Vite 配置
 ├── jsconfig.json            # JS 配置（包含 utools-api-types）
@@ -418,3 +424,61 @@ const detectLanguage = (text) => {
    - 避免不必要的 DOM 节点
    - 使用 `box-sizing: border-box` 确保尺寸计算正确
    - 禁用用户可调整大小的元素（如 `resize: none`）
+
+## Claude Code Skills
+
+项目中配置了以下 Claude Code Skills，用于自动化常见任务：
+
+### Release Skill
+
+**位置**: `.claude/skills/release.md`
+
+**用途**: 自动化版本发布流程，生成版本文档并更新项目配置。
+
+**使用方法**:
+
+```bash
+/release <version>
+```
+
+例如：
+
+```bash
+/release 1.0.0
+/release 1.1.0
+```
+
+**执行流程**:
+
+1. **验证版本号格式**: 检查版本号是否符合语义化版本规范
+2. **读取项目信息**: 读取 `package.json`、`plugin.json`、`CLAUDE.md` 等文件
+3. **生成版本更新文档**: 创建 `documents/updates/{version}.md` 文件
+   - 包含版本概述、新增功能、改进优化、问题修复等章节
+   - 使用 emoji 图标增强可读性
+   - 保持专业且友好的语气
+4. **更新插件介绍文档**: 更新 `documents/introduce.md` 文件
+   - 在版本历史部分添加新版本记录
+   - 保持与版本更新文档的一致性
+5. **更新版本号（可选）**: 询问是否更新 `package.json` 和 `plugin.json` 中的版本号
+6. **生成发布检查清单**: 输出完整的发布前检查清单
+
+**文档规范**:
+
+- 遵循 Markdown 格式规范（标题前后空行、列表前后空行等）
+- 版本号遵循语义化版本规范（Semantic Versioning）
+  - 主版本号（Major）：不兼容的 API 修改
+  - 次版本号（Minor）：向下兼容的功能性新增
+  - 修订号（Patch）：向下兼容的问题修正
+- 内容应准确反映实际功能，与 CLAUDE.md 保持一致
+
+**发布检查清单**:
+
+- [ ] 版本更新文档已生成
+- [ ] 插件介绍文档已更新
+- [ ] 版本号已更新（如果需要）
+- [ ] 执行 `pnpm build` 构建生产版本
+- [ ] 测试插件功能是否正常
+- [ ] 检查文档中的链接和格式
+- [ ] 准备发布到 uTools 插件中心
+- [ ] 创建 Git tag
+- [ ] 推送到远程仓库
