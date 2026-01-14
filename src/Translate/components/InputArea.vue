@@ -13,10 +13,18 @@ const props = defineProps({
   isLoading: {
     type: Boolean,
     default: false
+  },
+  isPolishing: {
+    type: Boolean,
+    default: false
+  },
+  polishedText: {
+    type: String,
+    default: ''
   }
 })
 
-const emit = defineEmits(['update:modelValue', 'translate', 'clear'])
+const emit = defineEmits(['update:modelValue', 'translate', 'clear', 'polish', 'acceptPolish', 'rejectPolish'])
 
 const text = computed({
   get: () => props.modelValue,
@@ -42,6 +50,20 @@ const handleClear = () => {
   emit('clear')
 }
 
+const handlePolish = () => {
+  if (text.value && !props.isLoading && !props.isPolishing) {
+    emit('polish')
+  }
+}
+
+const handleAcceptPolish = () => {
+  emit('acceptPolish')
+}
+
+const handleRejectPolish = () => {
+  emit('rejectPolish')
+}
+
 const handleKeydown = (event) => {
   // Enter 键翻译（不按 Shift）
   if (event.key === 'Enter' && !event.shiftKey) {
@@ -64,7 +86,27 @@ const handleKeydown = (event) => {
       </span>
     </div>
 
+    <!-- 润色对比视图 -->
+    <div v-if="polishedText" class="polish-comparison">
+      <div class="comparison-panel">
+        <div class="panel-header">
+          <span class="panel-icon">📝</span>
+          <span class="panel-title">原文</span>
+        </div>
+        <div class="panel-content">{{ modelValue }}</div>
+      </div>
+      <div class="comparison-panel highlight">
+        <div class="panel-header">
+          <span class="panel-icon">✨</span>
+          <span class="panel-title">润色后</span>
+        </div>
+        <div class="panel-content">{{ polishedText }}</div>
+      </div>
+    </div>
+
+    <!-- 普通输入框 -->
     <textarea
+      v-else
       v-model="text"
       class="input-textarea"
       placeholder="请输入要翻译的内容..."
@@ -73,23 +115,53 @@ const handleKeydown = (event) => {
     />
 
     <div class="input-actions">
-      <button
-        class="btn btn-clear"
-        @click="handleClear"
-        :disabled="!text"
-      >
-        <span class="btn-icon">🗑️</span>
-        <span class="btn-text">清空</span>
-      </button>
-      <button
-        class="btn btn-translate"
-        @click="handleTranslate"
-        :disabled="!text || isLoading"
-      >
-        <span class="btn-icon" v-if="!isLoading">✨</span>
-        <span class="btn-spinner" v-else></span>
-        <span class="btn-text">{{ isLoading ? '翻译中...' : '翻译' }}</span>
-      </button>
+      <!-- 润色对比模式下的按钮 -->
+      <template v-if="polishedText">
+        <button
+          class="btn btn-reject"
+          @click="handleRejectPolish"
+        >
+          <span class="btn-icon">❌</span>
+          <span class="btn-text">拒绝</span>
+        </button>
+        <button
+          class="btn btn-accept"
+          @click="handleAcceptPolish"
+        >
+          <span class="btn-icon">✅</span>
+          <span class="btn-text">采纳</span>
+        </button>
+      </template>
+
+      <!-- 普通模式下的按钮 -->
+      <template v-else>
+        <button
+          class="btn btn-clear"
+          @click="handleClear"
+          :disabled="!text"
+        >
+          <span class="btn-icon">🗑️</span>
+          <span class="btn-text">清空</span>
+        </button>
+        <button
+          class="btn btn-polish"
+          @click="handlePolish"
+          :disabled="!text || isLoading || isPolishing"
+        >
+          <span class="btn-icon" v-if="!isPolishing">✨</span>
+          <span class="btn-spinner" v-else></span>
+          <span class="btn-text">{{ isPolishing ? '润色中...' : '润色' }}</span>
+        </button>
+        <button
+          class="btn btn-translate"
+          @click="handleTranslate"
+          :disabled="!text || isLoading"
+        >
+          <span class="btn-icon" v-if="!isLoading">🌐</span>
+          <span class="btn-spinner" v-else></span>
+          <span class="btn-text">{{ isLoading ? '翻译中...' : '翻译' }}</span>
+        </button>
+      </template>
     </div>
   </div>
 </template>
@@ -209,6 +281,77 @@ const handleKeydown = (event) => {
   overflow-y: auto;
 }
 
+/* 润色对比视图 */
+.polish-comparison {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 12px;
+  min-height: 120px;
+}
+
+.comparison-panel {
+  background: rgba(248, 250, 252, 0.8);
+  border: 2px solid transparent;
+  border-radius: 12px;
+  padding: 12px;
+  transition: all 0.3s ease;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.comparison-panel.highlight {
+  background: linear-gradient(135deg, rgba(102, 126, 234, 0.05) 0%, rgba(118, 75, 162, 0.05) 100%);
+  border-color: rgba(102, 126, 234, 0.3);
+}
+
+.panel-header {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text-secondary, #8492a6);
+}
+
+.panel-icon {
+  font-size: 14px;
+}
+
+.panel-title {
+  letter-spacing: 0.3px;
+}
+
+.panel-content {
+  flex: 1;
+  font-size: 14px;
+  line-height: 1.6;
+  color: var(--text-primary, #2c3e50);
+  white-space: pre-wrap;
+  word-break: break-word;
+  overflow-y: auto;
+  max-height: 150px;
+  padding: 4px;
+}
+
+/* 对比面板滚动条 */
+.panel-content::-webkit-scrollbar {
+  width: 4px;
+}
+
+.panel-content::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.panel-content::-webkit-scrollbar-thumb {
+  background: rgba(102, 126, 234, 0.3);
+  border-radius: 2px;
+}
+
+.panel-content::-webkit-scrollbar-thumb:hover {
+  background: rgba(102, 126, 234, 0.5);
+}
+
 .input-actions {
   display: flex;
   justify-content: flex-end;
@@ -270,6 +413,17 @@ const handleKeydown = (event) => {
   box-shadow: 0 4px 12px rgba(0, 0, 0, 0.12);
 }
 
+.btn-polish {
+  background: linear-gradient(135deg, #f093fb 0%, #f5576c 100%);
+  color: white;
+  box-shadow: 0 4px 12px rgba(240, 147, 251, 0.4);
+}
+
+.btn-polish:hover:not(:disabled) {
+  transform: translateY(-2px);
+  box-shadow: 0 6px 16px rgba(240, 147, 251, 0.5);
+}
+
 .btn-translate {
   background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
   color: white;
@@ -279,6 +433,28 @@ const handleKeydown = (event) => {
 .btn-translate:hover:not(:disabled) {
   transform: translateY(-2px);
   box-shadow: 0 6px 16px rgba(102, 126, 234, 0.5);
+}
+
+.btn-accept {
+  background: linear-gradient(135deg, #4ade80 0%, #22c55e 100%);
+  color: white;
+  box-shadow: 0 4px 12px rgba(74, 222, 128, 0.4);
+}
+
+.btn-accept:hover:not(:disabled) {
+  transform: translateY(-2px);
+  box-shadow: 0 6px 16px rgba(74, 222, 128, 0.5);
+}
+
+.btn-reject {
+  background: linear-gradient(135deg, #f87171 0%, #ef4444 100%);
+  color: white;
+  box-shadow: 0 4px 12px rgba(248, 113, 113, 0.4);
+}
+
+.btn-reject:hover:not(:disabled) {
+  transform: translateY(-2px);
+  box-shadow: 0 6px 16px rgba(248, 113, 113, 0.5);
 }
 
 .btn:disabled {
@@ -341,6 +517,28 @@ const handleKeydown = (event) => {
     background: rgba(102, 126, 234, 0.6);
   }
 
+  /* 深色模式对比面板 */
+  .comparison-panel {
+    background: rgba(30, 30, 30, 0.8);
+  }
+
+  .comparison-panel.highlight {
+    background: linear-gradient(135deg, rgba(102, 126, 234, 0.1) 0%, rgba(118, 75, 162, 0.1) 100%);
+    border-color: rgba(102, 126, 234, 0.4);
+  }
+
+  .panel-content {
+    color: var(--text-primary, #e0e0e0);
+  }
+
+  .panel-content::-webkit-scrollbar-thumb {
+    background: rgba(102, 126, 234, 0.4);
+  }
+
+  .panel-content::-webkit-scrollbar-thumb:hover {
+    background: rgba(102, 126, 234, 0.6);
+  }
+
   .btn-clear {
     background: linear-gradient(135deg, #3a3a3a 0%, #2d2d2d 100%);
     color: var(--text-primary, #e0e0e0);
@@ -355,6 +553,22 @@ const handleKeydown = (event) => {
   .input-area {
     padding: 12px;
     gap: 10px;
+  }
+
+  /* 移动端润色对比视图 */
+  .polish-comparison {
+    grid-template-columns: 1fr;
+    gap: 10px;
+    min-height: 140px;
+  }
+
+  .comparison-panel {
+    padding: 10px;
+  }
+
+  .panel-content {
+    max-height: 120px;
+    font-size: 13px;
   }
 
   .input-textarea {

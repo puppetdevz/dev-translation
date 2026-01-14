@@ -18,6 +18,11 @@ const translationResult = ref(null)
 const isLoading = ref(false)
 const error = ref('')
 
+// 润色相关状态
+const isPolishing = ref(false)
+const polishedText = ref('')
+const originalText = ref('')
+
 // 语言检测
 const detectLanguage = (text) => {
   if (!text || !text.trim()) return ''
@@ -150,12 +155,85 @@ const translate = async () => {
   }
 }
 
+// 构建润色 Prompt
+const buildPolishPrompt = (text, lang) => {
+  const langName = lang === 'zh' ? '中文' : '英文'
+
+  return `请对以下${langName}文本进行润色，以易于理解但保留适当专业性的风格重写。
+
+要润色的内容: ${text}
+
+要求:
+1. 保持原文的核心含义和专业性
+2. 使表达更清晰、流畅、易懂
+3. 改善语法和用词的准确性
+4. 保持适当的语气（正式/非正式根据原文判断）
+5. 仅返回润色后的文本，不要添加任何其他文字或解释
+6. 不要使用markdown代码块，直接返回纯文本
+
+直接返回润色后的文本。`
+}
+
+// 润色函数
+const polish = async () => {
+  if (!inputText.value || !inputText.value.trim()) {
+    error.value = '请输入要润色的内容'
+    return
+  }
+
+  if (inputText.value.length > 5000) {
+    error.value = '文本过长，请控制在5000字符以内'
+    return
+  }
+
+  isPolishing.value = true
+  error.value = ''
+
+  try {
+    const lang = detectLanguage(inputText.value)
+    const prompt = buildPolishPrompt(inputText.value, lang)
+
+    const result = await window.utools.ai({
+      messages: [{ role: 'user', content: prompt }]
+    })
+
+    // 清理可能的 markdown 代码块
+    let polished = result.content.trim()
+    polished = polished.replace(/^```[\w]*\n/, '').replace(/\n```$/, '')
+
+    originalText.value = inputText.value
+    polishedText.value = polished
+  } catch (err) {
+    console.error('Polish error:', err)
+    error.value = err.message || '润色失败，请重试'
+  } finally {
+    isPolishing.value = false
+  }
+}
+
+// 采纳润色结果
+const handleAcceptPolish = () => {
+  inputText.value = polishedText.value
+  polishedText.value = ''
+  originalText.value = ''
+  // 更新语言检测
+  detectedLanguage.value = detectLanguage(inputText.value)
+}
+
+// 拒绝润色结果
+const handleRejectPolish = () => {
+  polishedText.value = ''
+  originalText.value = ''
+}
+
 // 清空输入
 const handleClear = () => {
   inputText.value = ''
   translationResult.value = null
   error.value = ''
   detectedLanguage.value = ''
+  polishedText.value = ''
+  originalText.value = ''
 }
 
 // 重试
@@ -196,8 +274,13 @@ watch(() => props.enterAction, (action) => {
           v-model="inputText"
           :detectedLanguage="detectedLanguage"
           :isLoading="isLoading"
+          :isPolishing="isPolishing"
+          :polishedText="polishedText"
           @translate="translate"
           @clear="handleClear"
+          @polish="polish"
+          @acceptPolish="handleAcceptPolish"
+          @rejectPolish="handleRejectPolish"
         />
       </div>
 
