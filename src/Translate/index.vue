@@ -199,13 +199,6 @@ watch(() => props.enterAction, (action) => {
 
 <template>
   <div class="translate-container">
-    <div class="translate-header">
-      <h1 class="translate-title">
-        <span class="title-icon">🌐</span>
-        开发者翻译
-      </h1>
-    </div>
-
     <div class="translate-content">
       <div class="translate-input-section">
         <InputArea
@@ -246,29 +239,6 @@ watch(() => props.enterAction, (action) => {
   background: linear-gradient(135deg, #f5f7fa 0%, #ffffff 100%);
   color: var(--text-primary, #2c3e50);
   overflow: hidden;
-}
-
-.translate-header {
-  padding: 16px 24px;
-  background: rgba(255, 255, 255, 0.8);
-  backdrop-filter: blur(10px);
-  border-bottom: 1px solid rgba(0, 0, 0, 0.06);
-}
-
-.translate-title {
-  font-size: 24px;
-  font-weight: 700;
-  margin: 0;
-  color: var(--text-primary, #2c3e50);
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  letter-spacing: -0.5px;
-}
-
-.title-icon {
-  font-size: 28px;
-  filter: drop-shadow(0 2px 4px rgba(0, 0, 0, 0.1));
 }
 
 .translate-content {
@@ -322,15 +292,6 @@ watch(() => props.enterAction, (action) => {
     color: var(--text-primary, #e0e0e0);
   }
 
-  .translate-header {
-    background: rgba(45, 45, 45, 0.8);
-    border-bottom: 1px solid rgba(255, 255, 255, 0.1);
-  }
-
-  .translate-title {
-    color: var(--text-primary, #e0e0e0);
-  }
-
   .translate-footer {
     background: rgba(45, 45, 45, 0.6);
     border-top: 1px solid rgba(255, 255, 255, 0.1);
@@ -352,18 +313,6 @@ watch(() => props.enterAction, (action) => {
     gap: 12px;
   }
 
-  .translate-header {
-    padding: 12px 16px;
-  }
-
-  .translate-title {
-    font-size: 20px;
-  }
-
-  .title-icon {
-    font-size: 24px;
-  }
-
   .translate-footer {
     padding: 10px 16px;
   }
@@ -371,18 +320,6 @@ watch(() => props.enterAction, (action) => {
 
 /* 小窗口优化 */
 @media (max-height: 600px) {
-  .translate-header {
-    padding: 10px 16px;
-  }
-
-  .translate-title {
-    font-size: 18px;
-  }
-
-  .title-icon {
-    font-size: 20px;
-  }
-
   .translate-content {
     padding: 8px 16px;
     gap: 10px;
@@ -400,18 +337,6 @@ watch(() => props.enterAction, (action) => {
 
 /* 超小窗口优化 */
 @media (max-height: 400px) {
-  .translate-header {
-    padding: 8px 12px;
-  }
-
-  .translate-title {
-    font-size: 16px;
-  }
-
-  .title-icon {
-    font-size: 18px;
-  }
-
   .translate-content {
     padding: 6px 12px;
     gap: 8px;
