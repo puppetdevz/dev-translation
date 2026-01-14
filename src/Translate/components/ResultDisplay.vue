@@ -82,7 +82,9 @@ const namingStyles = computed(() => {
 const copyText = async (text) => {
   try {
     await navigator.clipboard.writeText(text)
-    window.utools.showNotification('已复制到剪贴板')
+    // 显示复制的内容，如果太长则截断
+    const displayText = text.length > 30 ? text.substring(0, 30) + '...' : text
+    window.utools.showNotification(`已复制: ${displayText}`)
   } catch (err) {
     console.error('Copy failed:', err)
     window.utools.showNotification('复制失败')
@@ -136,11 +138,13 @@ const handleRetry = () => {
         <div class="card-header compact">
           <span class="card-icon">💻</span>
           <h3>变量命名</h3>
+          <span class="hint-text">点击复制</span>
         </div>
         <div class="naming-styles">
-          <div v-for="(value, key) in namingStyles" :key="key" class="naming-item">
+          <div v-for="(value, key) in namingStyles" :key="key" class="naming-item" @click="copyText(value)">
             <span class="naming-label">{{ key }}:</span>
-            <code class="naming-value" @click="copyText(value)">{{ value }}</code>
+            <code class="naming-value">{{ value }}</code>
+            <span class="copy-hint">📋</span>
           </div>
         </div>
       </div>
@@ -337,6 +341,14 @@ const handleRetry = () => {
   margin-bottom: 8px;
 }
 
+.hint-text {
+  font-size: 11px;
+  color: var(--text-secondary, #8492a6);
+  font-weight: 500;
+  margin-left: auto;
+  opacity: 0.7;
+}
+
 .header-left {
   display: flex;
   align-items: center;
@@ -438,11 +450,18 @@ const handleRetry = () => {
   background: rgba(102, 126, 234, 0.05);
   border-radius: 6px;
   transition: all 0.2s ease;
+  cursor: pointer;
+  position: relative;
 }
 
 .naming-item:hover {
   background: rgba(102, 126, 234, 0.1);
   transform: translateY(-1px);
+  box-shadow: 0 2px 8px rgba(102, 126, 234, 0.15);
+}
+
+.naming-item:active {
+  transform: translateY(0);
 }
 
 .naming-label {
@@ -460,15 +479,23 @@ const handleRetry = () => {
   background: rgba(255, 255, 255, 0.5);
   padding: 2px 6px;
   border-radius: 4px;
-  cursor: pointer;
-  transition: all 0.2s ease;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+  pointer-events: none;
 }
 
-.naming-value:hover {
-  background: rgba(102, 126, 234, 0.15);
+.copy-hint {
+  font-size: 12px;
+  opacity: 0;
+  transition: opacity 0.2s ease;
+}
+
+.naming-item:hover .copy-hint {
+  opacity: 1;
+}
+
+.naming-item:hover .naming-value {
   color: #764ba2;
 }
 
@@ -525,6 +552,10 @@ const handleRetry = () => {
     color: var(--text-primary, #e0e0e0);
   }
 
+  .hint-text {
+    color: var(--text-secondary, #a0aec0);
+  }
+
   .translation-text,
   .section-item {
     color: var(--text-primary, #e0e0e0);
@@ -546,7 +577,7 @@ const handleRetry = () => {
     background: rgba(0, 0, 0, 0.3);
   }
 
-  .naming-value:hover {
+  .naming-item:hover .naming-value {
     background: rgba(102, 126, 234, 0.2);
   }
 }
