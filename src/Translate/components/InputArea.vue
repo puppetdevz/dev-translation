@@ -60,7 +60,7 @@ const handleKeydown = (event) => {
         <span class="badge-text">{{ languageIndicator }}</span>
       </div>
       <span class="char-count" :class="{ 'char-count-warning': charCount > 4500 }">
-        {{ charCount }}/5000
+        字符数: {{ charCount }}/5000
       </span>
     </div>
 
