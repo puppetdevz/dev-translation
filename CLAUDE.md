@@ -39,6 +39,11 @@ pnpm build
 │   ├── App.vue              # 根组件（路由控制）
 │   └── Translate/           # 翻译功能模块
 │       ├── index.vue        # 翻译主组件
+│       ├── prompts/         # AI 提示词模块
+│       │   ├── index.js                # 提示词索引文件
+│       │   ├── chineseToEnglish.js     # 中译英提示词
+│       │   ├── englishToChinese.js     # 英译中提示词
+│       │   └── polish.js               # 文本润色提示词
 │       └── components/      # 翻译子组件
 │           ├── InputArea.vue           # 输入区域组件
 │           ├── ResultDisplay.vue       # 结果展示组件
@@ -77,6 +82,22 @@ pnpm build
 - 自动语言检测（基于正则表达式）
 - 支持关键词触发和文本选择触发
 - 显示翻译结果、音标、释义、例句
+
+**AI 提示词模块** (`src/Translate/prompts/`):
+- **模块化管理**: 所有 AI 提示词集中在 prompts 子文件夹中
+- **chineseToEnglish.js**: 中译英提示词模板
+  - 返回格式: JSON (translation, phonetic, definitions, examples)
+  - 音标要求: 美式 IPA 格式
+  - 释义和例句: 3-5 个英文释义和例句
+- **englishToChinese.js**: 英译中提示词模板
+  - 返回格式: JSON (translation, phonetic, definitions, examples)
+  - 音标要求: 原文美式 IPA 格式
+  - 释义和例句: 3-5 个英文释义和例句（保持英文）
+- **polish.js**: 文本润色提示词模板
+  - 返回格式: 纯文本
+  - 润色风格: 易于理解但保留适当专业性
+  - 支持中英文自动识别
+- **index.js**: 统一导出所有提示词函数
 
 **子组件架构**:
 
@@ -255,6 +276,8 @@ const detectLanguage = (text) => {
 ```
 
 **AI Prompt 策略**：
+- 所有 AI 提示词集中在 `src/Translate/prompts/` 模块中管理
+- 在 `index.vue` 中通过 `import` 导入所需的提示词函数
 - 中译英：要求返回英文翻译、美式音标、英文释义、英文例句
 - 英译中：要求返回中文翻译、英文音标、英文释义、英文例句
 - 文本润色：要求以易于理解但保留适当专业性的风格重写
