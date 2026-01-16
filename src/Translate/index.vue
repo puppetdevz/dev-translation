@@ -179,12 +179,17 @@ const handleRetry = () => {
   translate()
 }
 
-// 监听输入变化，实时检测语言
+// 监听输入变化，实时检测语言并在输入为空时重置输出
 watch(inputText, (newValue) => {
-  if (newValue) {
+  if (newValue && newValue.trim()) {
     detectedLanguage.value = detectLanguage(newValue)
   } else {
+    // 输入为空时，重置所有状态
     detectedLanguage.value = ''
+    translationResult.value = null
+    error.value = ''
+    polishedText.value = ''
+    originalText.value = ''
   }
 })
 
@@ -261,7 +266,7 @@ watch(() => props.enterAction, (action) => {
   min-height: 0;
 }
 
-/* 自定义滚动条 */
+/* 自定义滚动条 - 输出区域 */
 .translate-result-section::-webkit-scrollbar {
   width: 8px;
 }
