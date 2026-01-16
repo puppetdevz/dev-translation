@@ -186,6 +186,9 @@ const handleRetry = () => {
 .result-display {
   width: 100%;
   height: 100%;
+  min-height: 300px;
+  display: flex;
+  flex-direction: column;
 }
 
 /* 加载状态 */
@@ -196,6 +199,8 @@ const handleRetry = () => {
   justify-content: center;
   padding: 30px 20px;
   color: var(--text-secondary, #8492a6);
+  min-height: 300px;
+  flex: 1;
 }
 
 .loading-animation {
@@ -245,6 +250,8 @@ const handleRetry = () => {
   justify-content: center;
   padding: 30px 20px;
   text-align: center;
+  min-height: 300px;
+  flex: 1;
 }
 
 .error-icon {
@@ -289,6 +296,8 @@ const handleRetry = () => {
 .empty-state {
   width: 100%;
   height: 100%;
+  min-height: 300px;
+  flex: 1;
 }
 
 /* 响应式网格布局 */
@@ -297,6 +306,8 @@ const handleRetry = () => {
   grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
   gap: 10px;
   width: 100%;
+  min-height: 300px;
+  align-content: start;
 }
 
 .card {
