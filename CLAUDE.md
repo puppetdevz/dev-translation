@@ -123,7 +123,7 @@ pnpm build
 
 2. **ResultDisplay.vue** - 结果展示组件
    - 紧凑的响应式网格布局（CSS Grid）
-   - **布局稳定性**：所有状态（空、加载、错误、结果）统一设置 300px 最小高度，避免状态切换时的高度跳动
+   - **50/50 固定布局**：输入和输出区域各占 50% 屏幕高度，保持稳定的上下布局
    - 智能单词/字符数量检测，根据翻译结果显示不同内容：
      - **单词数 ≤ 3**: 显示音标
      - **单词数 ≤ 5**: 显示变量命名样式 + 音标
@@ -146,7 +146,7 @@ pnpm build
    - 优雅的加载动画（三个跳动的圆点）
    - 卡片悬停上浮效果和淡入动画
    - 所有内容可在屏幕内一次性显示，无需滚动
-   - 空状态保持空白，不显示任何提示信息
+   - **空状态视觉效果**：空状态显示带阴影的白色卡片，保持视觉一致性
    - 深色模式完整适配
 
 3. **KeyboardShortcuts.vue** - 快捷键提示组件
@@ -164,8 +164,13 @@ pnpm build
 - **内容优先**: 精简显示内容（释义 3 个、例句 2 个）
 
 **设计特点**:
-- **现代化风格**: 渐变色彩 (#667eea → #764ba2)、毛玻璃效果、柔和阴影
+- **简洁现代风格**:
+  - 纯白卡片设计，柔和阴影效果
+  - 主色调：紫色渐变 (#667eea → #764ba2)
+  - 浅灰背景：#f8fafc → #f1f5f9
+  - 深色模式：#0f172a → #1e293b
 - **流式布局**: CSS Grid 自适应网格、Flexbox 弹性布局、支持窗口拉伸
+- **50/50 固定布局**: 输入和输出区域各占 50% 屏幕高度，保持稳定的上下布局
 - **响应式设计**:
   - 大屏幕 (> 1024px): 释义和例句并排显示，充分利用横向空间
   - 中等屏幕 (768-1024px): 单列布局，垂直堆叠
@@ -201,14 +206,26 @@ pnpm build
 --primary-gradient: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
 
 /* 背景 */
---bg-light: linear-gradient(135deg, #f5f7fa 0%, #ffffff 100%);
---bg-dark: linear-gradient(135deg, #1a1a1a 0%, #2d2d2d 100%);
+--bg-light: linear-gradient(135deg, #f8fafc 0%, #f1f5f9 100%);
+--bg-dark: linear-gradient(135deg, #0f172a 0%, #1e293b 100%);
+
+/* 卡片 */
+--card-light: white;
+--card-dark: #1e293b;
+
+/* 边框 */
+--border-light: #e2e8f0;
+--border-dark: #334155;
 
 /* 文本 */
---text-primary-light: #2c3e50;
---text-primary-dark: #e0e0e0;
---text-secondary-light: #8492a6;
---text-secondary-dark: #a0aec0;
+--text-primary-light: #1e293b;
+--text-primary-dark: #f1f5f9;
+--text-secondary-light: #64748b;
+--text-secondary-dark: #94a3b8;
+
+/* 阴影 */
+--shadow-light: 0 1px 3px rgba(0, 0, 0, 0.05), 0 1px 2px rgba(0, 0, 0, 0.03);
+--shadow-dark: 0 1px 3px rgba(0, 0, 0, 0.3), 0 1px 2px rgba(0, 0, 0, 0.2);
 ```
 
 #### 5. Node.js 能力注入
