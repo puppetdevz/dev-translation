@@ -186,7 +186,6 @@ const handleRetry = () => {
 .result-display {
   width: 100%;
   height: 100%;
-  min-height: 300px;
   display: flex;
   flex-direction: column;
 }
@@ -199,7 +198,6 @@ const handleRetry = () => {
   justify-content: center;
   padding: 30px 20px;
   color: var(--text-secondary, #8492a6);
-  min-height: 300px;
   flex: 1;
 }
 
@@ -250,7 +248,6 @@ const handleRetry = () => {
   justify-content: center;
   padding: 30px 20px;
   text-align: center;
-  min-height: 300px;
   flex: 1;
 }
 
@@ -292,12 +289,15 @@ const handleRetry = () => {
   font-size: 14px;
 }
 
-/* 空状态 - 保持空白 */
+/* 空状态 - 保持空白但带阴影效果 */
 .empty-state {
   width: 100%;
   height: 100%;
-  min-height: 300px;
   flex: 1;
+  background: white;
+  border-radius: 16px;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.05), 0 1px 2px rgba(0, 0, 0, 0.03);
+  transition: all 0.3s ease;
 }
 
 /* 响应式网格布局 */
@@ -306,23 +306,21 @@ const handleRetry = () => {
   grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
   gap: 10px;
   width: 100%;
-  min-height: 300px;
   align-content: start;
 }
 
 .card {
-  background: rgba(255, 255, 255, 0.9);
-  backdrop-filter: blur(10px);
-  border-radius: 10px;
-  padding: 12px;
-  box-shadow: 0 2px 12px rgba(0, 0, 0, 0.06);
-  transition: all 0.3s ease;
-  animation: fadeInUp 0.4s ease;
+  background: white;
+  border-radius: 12px;
+  padding: 16px;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.05), 0 1px 2px rgba(0, 0, 0, 0.03);
+  transition: all 0.2s ease;
+  animation: fadeInUp 0.3s ease;
 }
 
 .card:hover {
-  transform: translateY(-2px);
-  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.1);
+  transform: translateY(-1px);
+  box-shadow: 0 4px 6px rgba(0, 0, 0, 0.07), 0 2px 4px rgba(0, 0, 0, 0.05);
 }
 
 .full-width {
@@ -372,11 +370,11 @@ const handleRetry = () => {
 }
 
 .card-header h3 {
-  font-size: 13px;
+  font-size: 14px;
   font-weight: 700;
   margin: 0;
-  color: var(--text-primary, #2c3e50);
-  letter-spacing: -0.3px;
+  color: var(--text-primary, #1e293b);
+  letter-spacing: -0.01em;
 }
 
 .btn-copy {
@@ -411,7 +409,8 @@ const handleRetry = () => {
 
 /* 翻译结果卡片 - 新布局 */
 .translation-card {
-  background: linear-gradient(135deg, rgba(102, 126, 234, 0.05) 0%, rgba(118, 75, 162, 0.05) 100%);
+  background: linear-gradient(135deg, #f8fafc 0%, #f1f5f9 100%);
+  border: 1px solid #e2e8f0;
 }
 
 .translation-main {
@@ -427,11 +426,12 @@ const handleRetry = () => {
 }
 
 .translation-text {
-  font-size: 18px;
-  font-weight: 600;
-  color: var(--text-primary, #2c3e50);
-  margin: 0 0 6px 0;
+  font-size: 20px;
+  font-weight: 700;
+  color: var(--text-primary, #1e293b);
+  margin: 0 0 8px 0;
   line-height: 1.4;
+  letter-spacing: -0.02em;
 }
 
 .phonetic-text {
@@ -439,12 +439,13 @@ const handleRetry = () => {
   font-family: 'Lucida Sans Unicode', 'Arial Unicode MS', sans-serif;
   color: #667eea;
   margin: 0;
-  font-weight: 500;
+  font-weight: 600;
 }
 
 /* 变量命名样式卡片 */
 .naming-card {
-  background: linear-gradient(135deg, rgba(102, 126, 234, 0.03) 0%, rgba(118, 75, 162, 0.03) 100%);
+  background: linear-gradient(135deg, #f8fafc 0%, #f1f5f9 100%);
+  border: 1px solid #e2e8f0;
 }
 
 .naming-styles {
@@ -456,19 +457,21 @@ const handleRetry = () => {
 .naming-item {
   display: flex;
   align-items: center;
-  gap: 6px;
-  padding: 6px 10px;
-  background: rgba(102, 126, 234, 0.05);
-  border-radius: 6px;
+  gap: 8px;
+  padding: 10px 14px;
+  background: white;
+  border: 1px solid #e2e8f0;
+  border-radius: 8px;
   transition: all 0.2s ease;
   cursor: pointer;
   position: relative;
 }
 
 .naming-item:hover {
-  background: rgba(102, 126, 234, 0.1);
+  background: #f8fafc;
+  border-color: #667eea;
   transform: translateY(-1px);
-  box-shadow: 0 2px 8px rgba(102, 126, 234, 0.15);
+  box-shadow: 0 2px 4px rgba(102, 126, 234, 0.1);
 }
 
 .naming-item:active {
@@ -484,16 +487,17 @@ const handleRetry = () => {
 
 .naming-value {
   flex: 1;
-  font-size: 12px;
+  font-size: 13px;
   font-family: 'Monaco', 'Menlo', 'Consolas', monospace;
   color: #667eea;
-  background: rgba(255, 255, 255, 0.5);
-  padding: 2px 6px;
+  background: #f8fafc;
+  padding: 4px 8px;
   border-radius: 4px;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
   pointer-events: none;
+  font-weight: 600;
 }
 
 .copy-hint {
@@ -512,7 +516,8 @@ const handleRetry = () => {
 
 /* 合并的释义和例句卡片 */
 .combined-card {
-  background: linear-gradient(135deg, rgba(102, 126, 234, 0.03) 0%, rgba(118, 75, 162, 0.03) 100%);
+  background: linear-gradient(135deg, #f8fafc 0%, #f1f5f9 100%);
+  border: 1px solid #e2e8f0;
 }
 
 .section-group {
@@ -531,8 +536,8 @@ const handleRetry = () => {
 }
 
 .section-item {
-  color: var(--text-primary, #2c3e50);
-  font-size: 12px;
+  color: var(--text-primary, #1e293b);
+  font-size: 13px;
   line-height: 1.6;
   display: inline;
 }
@@ -545,51 +550,59 @@ const handleRetry = () => {
 
 @media (prefers-color-scheme: dark) {
   .card {
-    background: rgba(45, 45, 45, 0.9);
-    box-shadow: 0 4px 20px rgba(0, 0, 0, 0.3);
+    background: #1e293b;
+    box-shadow: 0 1px 3px rgba(0, 0, 0, 0.3), 0 1px 2px rgba(0, 0, 0, 0.2);
   }
 
   .card:hover {
-    box-shadow: 0 8px 28px rgba(0, 0, 0, 0.4);
+    box-shadow: 0 4px 6px rgba(0, 0, 0, 0.4), 0 2px 4px rgba(0, 0, 0, 0.3);
   }
 
   .translation-card,
   .naming-card,
   .combined-card {
-    background: rgba(102, 126, 234, 0.1);
+    background: linear-gradient(135deg, #1e293b 0%, #334155 100%);
+    border-color: #334155;
   }
 
   .card-header h3 {
-    color: var(--text-primary, #e0e0e0);
+    color: var(--text-primary, #f1f5f9);
   }
 
   .hint-text {
-    color: var(--text-secondary, #a0aec0);
+    color: var(--text-secondary, #94a3b8);
   }
 
   .translation-text,
   .section-item {
-    color: var(--text-primary, #e0e0e0);
+    color: var(--text-primary, #f1f5f9);
   }
 
   .card-content {
-    color: var(--text-secondary, #a0aec0);
+    color: var(--text-secondary, #cbd5e1);
   }
 
   .naming-item {
-    background: rgba(102, 126, 234, 0.1);
+    background: #0f172a;
+    border-color: #334155;
   }
 
   .naming-item:hover {
-    background: rgba(102, 126, 234, 0.15);
+    background: #1e293b;
+    border-color: #667eea;
   }
 
   .naming-value {
-    background: rgba(0, 0, 0, 0.3);
+    background: #0f172a;
   }
 
   .naming-item:hover .naming-value {
-    background: rgba(102, 126, 234, 0.2);
+    background: #1e293b;
+  }
+
+  .empty-state {
+    background: #1e293b;
+    box-shadow: 0 1px 3px rgba(0, 0, 0, 0.3), 0 1px 2px rgba(0, 0, 0, 0.2);
   }
 }
 

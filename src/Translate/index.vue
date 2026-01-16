@@ -241,8 +241,8 @@ watch(() => props.enterAction, (action) => {
   display: flex;
   flex-direction: column;
   height: 100vh;
-  background: linear-gradient(135deg, #f5f7fa 0%, #ffffff 100%);
-  color: var(--text-primary, #2c3e50);
+  background: linear-gradient(135deg, #f8fafc 0%, #f1f5f9 100%);
+  color: var(--text-primary, #1e293b);
   overflow: hidden;
 }
 
@@ -251,16 +251,19 @@ watch(() => props.enterAction, (action) => {
   display: flex;
   flex-direction: column;
   overflow: hidden;
-  padding: 16px 24px;
-  gap: 16px;
+  padding: 20px;
+  gap: 20px;
 }
 
 .translate-input-section {
-  flex-shrink: 0;
+  flex: 0 0 50%;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
 }
 
 .translate-result-section {
-  flex: 1;
+  flex: 0 0 50%;
   overflow-y: auto;
   overflow-x: hidden;
   min-height: 0;
@@ -293,12 +296,12 @@ watch(() => props.enterAction, (action) => {
 
 @media (prefers-color-scheme: dark) {
   .translate-container {
-    background: linear-gradient(135deg, #1a1a1a 0%, #2d2d2d 100%);
-    color: var(--text-primary, #e0e0e0);
+    background: linear-gradient(135deg, #0f172a 0%, #1e293b 100%);
+    color: var(--text-primary, #f1f5f9);
   }
 
   .translate-footer {
-    background: rgba(45, 45, 45, 0.6);
+    background: rgba(30, 41, 59, 0.8);
     border-top: 1px solid rgba(255, 255, 255, 0.1);
   }
 

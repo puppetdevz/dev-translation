@@ -182,20 +182,20 @@ const handleKeydown = (event) => {
 .input-area {
   display: flex;
   flex-direction: column;
-  gap: 8px;
-  background: rgba(255, 255, 255, 0.9);
-  backdrop-filter: blur(10px);
-  border-radius: 14px;
-  padding: 14px;
-  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.08);
+  gap: 12px;
+  background: white;
+  border-radius: 16px;
+  padding: 20px;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.05), 0 1px 2px rgba(0, 0, 0, 0.03);
   transition: all 0.3s ease;
   box-sizing: border-box;
   max-width: 100%;
   overflow: hidden;
+  height: 100%;
 }
 
 .input-area:hover {
-  box-shadow: 0 6px 24px rgba(0, 0, 0, 0.12);
+  box-shadow: 0 4px 6px rgba(0, 0, 0, 0.07), 0 2px 4px rgba(0, 0, 0, 0.05);
 }
 
 .input-footer {
@@ -208,14 +208,14 @@ const handleKeydown = (event) => {
 .language-badge {
   display: flex;
   align-items: center;
-  gap: 4px;
-  padding: 3px 8px;
+  gap: 6px;
+  padding: 6px 12px;
   background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-  border-radius: 12px;
-  font-size: 11px;
+  border-radius: 20px;
+  font-size: 12px;
   font-weight: 600;
   color: white;
-  box-shadow: 0 1px 4px rgba(102, 126, 234, 0.3);
+  box-shadow: 0 2px 8px rgba(102, 126, 234, 0.25);
   animation: fadeIn 0.3s ease;
 }
 
@@ -241,17 +241,17 @@ const handleKeydown = (event) => {
 
 .input-textarea {
   width: 100%;
-  min-height: 80px;
-  max-height: 200px;
-  padding: 12px;
-  border: 2px solid transparent;
+  flex: 1;
+  min-height: 100px;
+  padding: 16px;
+  border: 1.5px solid #e2e8f0;
   border-radius: 12px;
-  background-color: rgba(248, 250, 252, 0.8);
-  color: var(--text-primary, #2c3e50);
+  background-color: #f8fafc;
+  color: var(--text-primary, #1e293b);
   font-size: 14px;
   line-height: 1.6;
   resize: none;
-  transition: all 0.3s ease;
+  transition: all 0.2s ease;
   font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
   box-sizing: border-box;
   overflow-y: auto;
@@ -262,12 +262,12 @@ const handleKeydown = (event) => {
 .input-textarea:focus {
   outline: none;
   border-color: #667eea;
-  background-color: rgba(255, 255, 255, 0.95);
-  box-shadow: inset 0 0 0 1px #667eea, 0 0 0 2px rgba(102, 126, 234, 0.1);
+  background-color: white;
+  box-shadow: 0 0 0 3px rgba(102, 126, 234, 0.1);
 }
 
 .input-textarea::placeholder {
-  color: var(--text-secondary, #a0aec0);
+  color: #94a3b8;
 }
 
 /* 输入框滚动条样式 */
@@ -375,10 +375,10 @@ const handleKeydown = (event) => {
   display: flex;
   align-items: center;
   gap: 6px;
-  padding: 6px 16px;
+  padding: 10px 20px;
   border: none;
-  border-radius: 8px;
-  font-size: 12px;
+  border-radius: 10px;
+  font-size: 13px;
   font-weight: 600;
   cursor: pointer;
   transition: all 0.2s ease;
@@ -504,21 +504,23 @@ const handleKeydown = (event) => {
 
 @media (prefers-color-scheme: dark) {
   .input-area {
-    background: rgba(45, 45, 45, 0.9);
-    box-shadow: 0 4px 20px rgba(0, 0, 0, 0.3);
+    background: #1e293b;
+    box-shadow: 0 1px 3px rgba(0, 0, 0, 0.3), 0 1px 2px rgba(0, 0, 0, 0.2);
   }
 
   .input-area:hover {
-    box-shadow: 0 6px 24px rgba(0, 0, 0, 0.4);
+    box-shadow: 0 4px 6px rgba(0, 0, 0, 0.4), 0 2px 4px rgba(0, 0, 0, 0.3);
   }
 
   .input-textarea {
-    background-color: rgba(30, 30, 30, 0.8);
-    color: var(--text-primary, #e0e0e0);
+    background-color: #0f172a;
+    color: var(--text-primary, #f1f5f9);
+    border-color: #334155;
   }
 
   .input-textarea:focus {
-    background-color: rgba(40, 40, 40, 0.95);
+    background-color: #1e293b;
+    border-color: #667eea;
   }
 
   /* 深色模式输入框滚动条 */
@@ -532,7 +534,8 @@ const handleKeydown = (event) => {
 
   /* 深色模式对比面板 */
   .comparison-panel {
-    background: rgba(30, 30, 30, 0.8);
+    background: #0f172a;
+    border-color: #334155;
   }
 
   .comparison-panel.highlight {
@@ -541,7 +544,7 @@ const handleKeydown = (event) => {
   }
 
   .panel-content {
-    color: var(--text-primary, #e0e0e0);
+    color: var(--text-primary, #f1f5f9);
   }
 
   .panel-content::-webkit-scrollbar-thumb {
@@ -553,12 +556,12 @@ const handleKeydown = (event) => {
   }
 
   .btn-clear {
-    background: linear-gradient(135deg, #3a3a3a 0%, #2d2d2d 100%);
-    color: var(--text-primary, #e0e0e0);
+    background: linear-gradient(135deg, #334155 0%, #1e293b 100%);
+    color: var(--text-primary, #f1f5f9);
   }
 
   .btn-clear:hover:not(:disabled) {
-    background: linear-gradient(135deg, #4a4a4a 0%, #3a3a3a 100%);
+    background: linear-gradient(135deg, #475569 0%, #334155 100%);
   }
 }
 
