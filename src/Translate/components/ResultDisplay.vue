@@ -98,87 +98,91 @@ const handleRetry = () => {
 
 <template>
   <div class="result-display">
-    <!-- 加载状态 -->
-    <div v-if="isLoading" class="loading-state">
-      <div class="loading-animation">
-        <div class="loading-circle"></div>
-        <div class="loading-circle"></div>
-        <div class="loading-circle"></div>
-      </div>
-      <p class="loading-text">正在翻译中...</p>
-    </div>
-
-    <!-- 错误状态 -->
-    <div v-else-if="error" class="error-state">
-      <div class="error-icon">⚠️</div>
-      <p class="error-message">{{ error }}</p>
-      <button class="btn-retry" @click="handleRetry">
-        <span class="retry-icon">🔄</span>
-        <span>重试</span>
-      </button>
-    </div>
-
-    <!-- 结果展示 - 使用响应式网格布局 -->
-    <div v-else-if="result" class="result-grid">
-      <!-- 翻译结果卡片 - 包含翻译和音标（条件显示） -->
-      <div class="card translation-card full-width">
-        <div class="translation-main">
-          <div class="translation-content">
-            <p class="translation-text">{{ result.translation }}</p>
-            <p v-if="shouldShowPhonetic" class="phonetic-text">{{ result.phonetic }}</p>
-          </div>
-          <button class="btn-copy" @click="copyText(result.translation)">
-            <span class="copy-icon">📋</span>
-          </button>
+    <!-- 统一容器 - 所有状态共用 -->
+    <div class="result-container">
+      <!-- 加载状态内容 -->
+      <template v-if="isLoading">
+        <div class="loading-animation">
+          <div class="loading-circle"></div>
+          <div class="loading-circle"></div>
+          <div class="loading-circle"></div>
         </div>
-      </div>
+        <p class="loading-text">正在翻译中...</p>
+      </template>
 
-      <!-- 变量命名样式卡片 - 仅在单词数 <= 5 时显示 -->
-      <div v-if="namingStyles" class="card naming-card full-width">
-        <div class="card-header compact">
-          <span class="card-icon">💻</span>
-          <h3>变量命名</h3>
-          <span class="hint-text">点击复制</span>
-        </div>
-        <div class="naming-styles">
-          <div v-for="(value, key) in namingStyles" :key="key" class="naming-item" @click="copyText(value)">
-            <span class="naming-label">{{ key }}:</span>
-            <code class="naming-value">{{ value }}</code>
-            <span class="copy-hint">📋</span>
-          </div>
-        </div>
-      </div>
+      <!-- 错误状态内容 -->
+      <template v-else-if="error">
+        <div class="error-icon">⚠️</div>
+        <p class="error-message">{{ error }}</p>
+        <button class="btn-retry" @click="handleRetry">
+          <span class="retry-icon">🔄</span>
+          <span>重试</span>
+        </button>
+      </template>
 
-      <!-- 释义和例句合并卡片 -->
-      <div class="card combined-card full-width">
-        <div class="card-header compact">
-          <span class="card-icon">📚</span>
-          <h3>释义与例句</h3>
-        </div>
-        <div class="card-content">
-          <!-- 释义部分 -->
-          <div class="section-group">
-            <div class="section-items">
-              <span v-for="(def, index) in result.definitions.slice(0, 3)" :key="'def-' + index" class="section-item">
-                {{ def }}<span v-if="index < Math.min(result.definitions.length, 3) - 1" class="separator">•</span>
-              </span>
+      <!-- 结果展示内容 - 使用响应式网格布局 -->
+      <template v-else-if="result">
+        <div class="result-grid">
+          <!-- 翻译结果卡片 - 包含翻译和音标（条件显示） -->
+          <div class="card translation-card full-width">
+            <div class="translation-main">
+              <div class="translation-content">
+                <p class="translation-text">{{ result.translation }}</p>
+                <p v-if="shouldShowPhonetic" class="phonetic-text">{{ result.phonetic }}</p>
+              </div>
+              <button class="btn-copy" @click="copyText(result.translation)">
+                <span class="copy-icon">📋</span>
+              </button>
             </div>
           </div>
 
-          <!-- 例句部分 -->
-          <div class="section-group">
-            <div class="section-items">
-              <span v-for="(example, index) in result.examples.slice(0, 2)" :key="'ex-' + index" class="section-item">
-                {{ example }}<span v-if="index < Math.min(result.examples.length, 2) - 1" class="separator">•</span>
-              </span>
+          <!-- 变量命名样式卡片 - 仅在单词数 <= 5 时显示 -->
+          <div v-if="namingStyles" class="card naming-card full-width">
+            <div class="card-header compact">
+              <span class="card-icon">💻</span>
+              <h3>变量命名</h3>
+              <span class="hint-text">点击复制</span>
+            </div>
+            <div class="naming-styles">
+              <div v-for="(value, key) in namingStyles" :key="key" class="naming-item" @click="copyText(value)">
+                <span class="naming-label">{{ key }}:</span>
+                <code class="naming-value">{{ value }}</code>
+                <span class="copy-hint">📋</span>
+              </div>
+            </div>
+          </div>
+
+          <!-- 释义和例句合并卡片 -->
+          <div class="card combined-card full-width">
+            <div class="card-header compact">
+              <span class="card-icon">📚</span>
+              <h3>释义与例句</h3>
+            </div>
+            <div class="card-content">
+              <!-- 释义部分 -->
+              <div class="section-group">
+                <div class="section-items">
+                  <span v-for="(def, index) in result.definitions.slice(0, 3)" :key="'def-' + index" class="section-item">
+                    {{ def }}<span v-if="index < Math.min(result.definitions.length, 3) - 1" class="separator">•</span>
+                  </span>
+                </div>
+              </div>
+
+              <!-- 例句部分 -->
+              <div class="section-group">
+                <div class="section-items">
+                  <span v-for="(example, index) in result.examples.slice(0, 2)" :key="'ex-' + index" class="section-item">
+                    {{ example }}<span v-if="index < Math.min(result.examples.length, 2) - 1" class="separator">•</span>
+                  </span>
+                </div>
+              </div>
             </div>
           </div>
         </div>
-      </div>
-    </div>
+      </template>
 
-    <!-- 空状态 - 保持空白 -->
-    <div v-else class="empty-state"></div>
+      <!-- 空状态内容 - 无内容 -->
+    </div>
   </div>
 </template>
 
@@ -190,17 +194,24 @@ const handleRetry = () => {
   flex-direction: column;
 }
 
-/* 加载状态 */
-.loading-state {
+/* 统一容器 - 所有状态共用 */
+.result-container {
+  width: 100%;
+  height: 100%;
+  flex: 1;
+  background: white;
+  border-radius: 12px;
+  border: 1px solid rgba(226, 232, 240, 0.6);
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.03);
+  transition: all 0.3s ease;
   display: flex;
   flex-direction: column;
   align-items: center;
   justify-content: center;
-  padding: 30px 20px;
-  color: var(--text-secondary, #8492a6);
-  flex: 1;
+  padding: 20px;
 }
 
+/* 加载状态内容 */
 .loading-animation {
   display: flex;
   gap: 8px;
@@ -238,19 +249,10 @@ const handleRetry = () => {
   font-size: 13px;
   font-weight: 500;
   margin: 0;
+  color: var(--text-secondary, #8492a6);
 }
 
-/* 错误状态 */
-.error-state {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  justify-content: center;
-  padding: 30px 20px;
-  text-align: center;
-  flex: 1;
-}
-
+/* 错误状态内容 */
 .error-icon {
   font-size: 40px;
   margin-bottom: 12px;
@@ -289,18 +291,6 @@ const handleRetry = () => {
   font-size: 14px;
 }
 
-/* 空状态 - 保持空白但带阴影效果 */
-.empty-state {
-  width: 100%;
-  height: 100%;
-  flex: 1;
-  background: white;
-  border-radius: 12px;
-  border: 1px solid rgba(226, 232, 240, 0.5);
-  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.02);
-  transition: all 0.3s ease;
-}
-
 /* 响应式网格布局 */
 .result-grid {
   display: grid;
@@ -308,6 +298,18 @@ const handleRetry = () => {
   gap: 10px;
   width: 100%;
   align-content: start;
+  align-self: stretch;
+  justify-self: stretch;
+}
+
+/* 当有结果时，容器需要调整布局 */
+.result-container:has(.result-grid) {
+  align-items: stretch;
+  justify-content: flex-start;
+  padding: 0;
+  background: transparent;
+  border: none;
+  box-shadow: none;
 }
 
 .card {
@@ -564,6 +566,20 @@ const handleRetry = () => {
 }
 
 @media (prefers-color-scheme: dark) {
+  /* 统一容器深色模式 */
+  .result-container {
+    background: #1e293b;
+    border-color: rgba(51, 65, 85, 0.6);
+    box-shadow: 0 1px 2px rgba(0, 0, 0, 0.2);
+  }
+
+  /* 当有结果时，容器背景透明 */
+  .result-container:has(.result-grid) {
+    background: transparent;
+    border: none;
+    box-shadow: none;
+  }
+
   .card {
     background: #1e293b;
     border-color: rgba(51, 65, 85, 0.6);
@@ -621,12 +637,6 @@ const handleRetry = () => {
 
   .naming-item:hover .naming-value {
     background: #1e293b;
-  }
-
-  .empty-state {
-    background: #1e293b;
-    border-color: rgba(51, 65, 85, 0.5);
-    box-shadow: 0 1px 2px rgba(0, 0, 0, 0.2);
   }
 }
 
