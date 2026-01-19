@@ -63,7 +63,7 @@
 .shortcut-divider {
   width: 1px;
   height: 16px;
-  background: rgba(0, 0, 0, 0.1);
+  background: rgba(226, 232, 240, 0.6);
 }
 
 kbd {
@@ -77,20 +77,17 @@ kbd {
   font-weight: 600;
   line-height: 1;
   color: var(--text-primary, #2c3e50);
-  background: linear-gradient(180deg, rgba(255, 255, 255, 0.9) 0%, rgba(240, 240, 240, 0.9) 100%);
-  border: 1px solid rgba(0, 0, 0, 0.15);
+  background: white;
+  border: 1px solid rgba(226, 232, 240, 0.8);
   border-radius: 6px;
-  box-shadow:
-    0 1px 2px rgba(0, 0, 0, 0.1),
-    inset 0 1px 0 rgba(255, 255, 255, 0.8);
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.04);
   transition: all 0.2s ease;
 }
 
 kbd:hover {
   transform: translateY(-1px);
-  box-shadow:
-    0 2px 4px rgba(0, 0, 0, 0.15),
-    inset 0 1px 0 rgba(255, 255, 255, 0.8);
+  border-color: rgba(203, 213, 224, 1);
+  box-shadow: 0 2px 3px rgba(0, 0, 0, 0.06);
 }
 
 @media (prefers-color-scheme: dark) {
@@ -103,22 +100,19 @@ kbd:hover {
   }
 
   .shortcut-divider {
-    background: rgba(255, 255, 255, 0.15);
+    background: rgba(51, 65, 85, 0.6);
   }
 
   kbd {
     color: var(--text-primary, #e0e0e0);
-    background: linear-gradient(180deg, rgba(60, 60, 60, 0.9) 0%, rgba(40, 40, 40, 0.9) 100%);
-    border-color: rgba(255, 255, 255, 0.2);
-    box-shadow:
-      0 1px 2px rgba(0, 0, 0, 0.3),
-      inset 0 1px 0 rgba(255, 255, 255, 0.1);
+    background: #1e293b;
+    border-color: rgba(51, 65, 85, 0.8);
+    box-shadow: 0 1px 2px rgba(0, 0, 0, 0.2);
   }
 
   kbd:hover {
-    box-shadow:
-      0 2px 4px rgba(0, 0, 0, 0.4),
-      inset 0 1px 0 rgba(255, 255, 255, 0.1);
+    border-color: rgba(71, 85, 105, 1);
+    box-shadow: 0 2px 3px rgba(0, 0, 0, 0.25);
   }
 }
 
