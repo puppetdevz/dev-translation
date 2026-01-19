@@ -289,9 +289,9 @@ watch(() => props.enterAction, (action) => {
 
 .translate-footer {
   padding: 12px 24px;
-  background: rgba(255, 255, 255, 0.6);
+  background: rgba(255, 255, 255, 0.7);
   backdrop-filter: blur(10px);
-  border-top: 1px solid rgba(0, 0, 0, 0.06);
+  border-top: 1px solid rgba(226, 232, 240, 0.6);
 }
 
 @media (prefers-color-scheme: dark) {
@@ -302,7 +302,7 @@ watch(() => props.enterAction, (action) => {
 
   .translate-footer {
     background: rgba(30, 41, 59, 0.8);
-    border-top: 1px solid rgba(255, 255, 255, 0.1);
+    border-top: 1px solid rgba(51, 65, 85, 0.6);
   }
 
   .translate-result-section::-webkit-scrollbar-thumb {
