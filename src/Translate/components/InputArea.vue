@@ -184,9 +184,10 @@ const handleKeydown = (event) => {
   flex-direction: column;
   gap: 12px;
   background: white;
-  border-radius: 16px;
+  border-radius: 12px;
   padding: 20px;
-  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.05), 0 1px 2px rgba(0, 0, 0, 0.03);
+  border: 1px solid rgba(226, 232, 240, 0.8);
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.03);
   transition: all 0.3s ease;
   box-sizing: border-box;
   max-width: 100%;
@@ -195,7 +196,8 @@ const handleKeydown = (event) => {
 }
 
 .input-area:hover {
-  box-shadow: 0 4px 6px rgba(0, 0, 0, 0.07), 0 2px 4px rgba(0, 0, 0, 0.05);
+  border-color: rgba(226, 232, 240, 1);
+  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.04);
 }
 
 .input-footer {
@@ -215,7 +217,7 @@ const handleKeydown = (event) => {
   font-size: 12px;
   font-weight: 600;
   color: white;
-  box-shadow: 0 2px 8px rgba(102, 126, 234, 0.25);
+  box-shadow: 0 1px 3px rgba(102, 126, 234, 0.2);
   animation: fadeIn 0.3s ease;
 }
 
@@ -244,9 +246,9 @@ const handleKeydown = (event) => {
   flex: 1;
   min-height: 100px;
   padding: 16px;
-  border: 1.5px solid #e2e8f0;
-  border-radius: 12px;
-  background-color: #f8fafc;
+  border: 1px solid rgba(226, 232, 240, 0.6);
+  border-radius: 10px;
+  background-color: #fafbfc;
   color: var(--text-primary, #1e293b);
   font-size: 14px;
   line-height: 1.6;
@@ -261,9 +263,9 @@ const handleKeydown = (event) => {
 
 .input-textarea:focus {
   outline: none;
-  border-color: #667eea;
+  border-color: rgba(102, 126, 234, 0.5);
   background-color: white;
-  box-shadow: 0 0 0 3px rgba(102, 126, 234, 0.1);
+  box-shadow: 0 0 0 3px rgba(102, 126, 234, 0.08);
 }
 
 .input-textarea::placeholder {
@@ -303,9 +305,9 @@ const handleKeydown = (event) => {
 }
 
 .comparison-panel {
-  background: rgba(248, 250, 252, 0.8);
-  border: 2px solid transparent;
-  border-radius: 12px;
+  background: #fafbfc;
+  border: 1px solid rgba(226, 232, 240, 0.6);
+  border-radius: 10px;
   padding: 12px;
   transition: all 0.3s ease;
   display: flex;
@@ -314,8 +316,9 @@ const handleKeydown = (event) => {
 }
 
 .comparison-panel.highlight {
-  background: linear-gradient(135deg, rgba(102, 126, 234, 0.05) 0%, rgba(118, 75, 162, 0.05) 100%);
-  border-color: rgba(102, 126, 234, 0.3);
+  background: rgba(102, 126, 234, 0.03);
+  border-color: rgba(102, 126, 234, 0.4);
+  box-shadow: 0 0 0 1px rgba(102, 126, 234, 0.1);
 }
 
 .panel-header {
@@ -415,59 +418,65 @@ const handleKeydown = (event) => {
 }
 
 .btn-clear {
-  background: linear-gradient(135deg, #f5f7fa 0%, #e4e7eb 100%);
+  background: #f8fafc;
   color: var(--text-primary, #4a5568);
-  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.08);
+  border: 1px solid rgba(226, 232, 240, 0.8);
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.04);
 }
 
 .btn-clear:hover:not(:disabled) {
-  background: linear-gradient(135deg, #e4e7eb 0%, #cbd5e0 100%);
+  background: #f1f5f9;
+  border-color: rgba(203, 213, 224, 1);
   transform: translateY(-1px);
-  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.12);
+  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.06);
 }
 
 .btn-polish {
   background: linear-gradient(135deg, #f093fb 0%, #f5576c 100%);
   color: white;
-  box-shadow: 0 4px 12px rgba(240, 147, 251, 0.4);
+  border: 1px solid rgba(240, 147, 251, 0.3);
+  box-shadow: 0 2px 6px rgba(240, 147, 251, 0.25);
 }
 
 .btn-polish:hover:not(:disabled) {
-  transform: translateY(-2px);
-  box-shadow: 0 6px 16px rgba(240, 147, 251, 0.5);
+  transform: translateY(-1px);
+  box-shadow: 0 3px 8px rgba(240, 147, 251, 0.3);
 }
 
 .btn-translate {
   background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
   color: white;
-  box-shadow: 0 4px 12px rgba(102, 126, 234, 0.4);
+  border: 1px solid rgba(102, 126, 234, 0.3);
+  box-shadow: 0 2px 6px rgba(102, 126, 234, 0.25);
 }
 
 .btn-translate:hover:not(:disabled) {
-  transform: translateY(-2px);
-  box-shadow: 0 6px 16px rgba(102, 126, 234, 0.5);
+  transform: translateY(-1px);
+  box-shadow: 0 3px 8px rgba(102, 126, 234, 0.3);
 }
 
 .btn-accept {
   background: linear-gradient(135deg, #4ade80 0%, #22c55e 100%);
   color: white;
-  box-shadow: 0 4px 12px rgba(74, 222, 128, 0.4);
+  border: 1px solid rgba(74, 222, 128, 0.3);
+  box-shadow: 0 2px 6px rgba(74, 222, 128, 0.25);
 }
 
 .btn-accept:hover:not(:disabled) {
-  transform: translateY(-2px);
-  box-shadow: 0 6px 16px rgba(74, 222, 128, 0.5);
+  transform: translateY(-1px);
+  box-shadow: 0 3px 8px rgba(74, 222, 128, 0.3);
 }
 
 .btn-reject {
   background: linear-gradient(135deg, #f87171 0%, #ef4444 100%);
   color: white;
-  box-shadow: 0 4px 12px rgba(248, 113, 113, 0.4);
+  border: 1px solid rgba(248, 113, 113, 0.3);
+  box-shadow: 0 2px 6px rgba(248, 113, 113, 0.25);
 }
 
 .btn-reject:hover:not(:disabled) {
-  transform: translateY(-2px);
-  box-shadow: 0 6px 16px rgba(248, 113, 113, 0.5);
+  transform: translateY(-1px);
+  box-shadow: 0 3px 8px rgba(248, 113, 113, 0.3);
 }
 
 .btn:disabled {
@@ -505,22 +514,25 @@ const handleKeydown = (event) => {
 @media (prefers-color-scheme: dark) {
   .input-area {
     background: #1e293b;
-    box-shadow: 0 1px 3px rgba(0, 0, 0, 0.3), 0 1px 2px rgba(0, 0, 0, 0.2);
+    border-color: rgba(51, 65, 85, 0.8);
+    box-shadow: 0 1px 2px rgba(0, 0, 0, 0.2);
   }
 
   .input-area:hover {
-    box-shadow: 0 4px 6px rgba(0, 0, 0, 0.4), 0 2px 4px rgba(0, 0, 0, 0.3);
+    border-color: rgba(51, 65, 85, 1);
+    box-shadow: 0 2px 4px rgba(0, 0, 0, 0.25);
   }
 
   .input-textarea {
     background-color: #0f172a;
     color: var(--text-primary, #f1f5f9);
-    border-color: #334155;
+    border-color: rgba(51, 65, 85, 0.6);
   }
 
   .input-textarea:focus {
     background-color: #1e293b;
-    border-color: #667eea;
+    border-color: rgba(102, 126, 234, 0.6);
+    box-shadow: 0 0 0 3px rgba(102, 126, 234, 0.12);
   }
 
   /* 深色模式输入框滚动条 */
@@ -535,12 +547,13 @@ const handleKeydown = (event) => {
   /* 深色模式对比面板 */
   .comparison-panel {
     background: #0f172a;
-    border-color: #334155;
+    border-color: rgba(51, 65, 85, 0.6);
   }
 
   .comparison-panel.highlight {
-    background: linear-gradient(135deg, rgba(102, 126, 234, 0.1) 0%, rgba(118, 75, 162, 0.1) 100%);
-    border-color: rgba(102, 126, 234, 0.4);
+    background: rgba(102, 126, 234, 0.06);
+    border-color: rgba(102, 126, 234, 0.5);
+    box-shadow: 0 0 0 1px rgba(102, 126, 234, 0.15);
   }
 
   .panel-content {
@@ -556,12 +569,14 @@ const handleKeydown = (event) => {
   }
 
   .btn-clear {
-    background: linear-gradient(135deg, #334155 0%, #1e293b 100%);
+    background: #0f172a;
+    border-color: rgba(51, 65, 85, 0.8);
     color: var(--text-primary, #f1f5f9);
   }
 
   .btn-clear:hover:not(:disabled) {
-    background: linear-gradient(135deg, #475569 0%, #334155 100%);
+    background: #1e293b;
+    border-color: rgba(71, 85, 105, 1);
   }
 }
 

@@ -269,7 +269,7 @@ const handleRetry = () => {
   align-items: center;
   gap: 6px;
   padding: 8px 18px;
-  border: none;
+  border: 1px solid rgba(102, 126, 234, 0.3);
   border-radius: 8px;
   background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
   color: white;
@@ -277,12 +277,12 @@ const handleRetry = () => {
   font-weight: 600;
   cursor: pointer;
   transition: all 0.2s ease;
-  box-shadow: 0 3px 10px rgba(102, 126, 234, 0.4);
+  box-shadow: 0 2px 6px rgba(102, 126, 234, 0.25);
 }
 
 .btn-retry:hover {
   transform: translateY(-1px);
-  box-shadow: 0 4px 12px rgba(102, 126, 234, 0.5);
+  box-shadow: 0 3px 8px rgba(102, 126, 234, 0.3);
 }
 
 .retry-icon {
@@ -295,8 +295,9 @@ const handleRetry = () => {
   height: 100%;
   flex: 1;
   background: white;
-  border-radius: 16px;
-  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.05), 0 1px 2px rgba(0, 0, 0, 0.03);
+  border-radius: 12px;
+  border: 1px solid rgba(226, 232, 240, 0.5);
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.02);
   transition: all 0.3s ease;
 }
 
@@ -311,16 +312,18 @@ const handleRetry = () => {
 
 .card {
   background: white;
-  border-radius: 12px;
+  border-radius: 10px;
   padding: 16px;
-  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.05), 0 1px 2px rgba(0, 0, 0, 0.03);
+  border: 1px solid rgba(226, 232, 240, 0.6);
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.03);
   transition: all 0.2s ease;
   animation: fadeInUp 0.3s ease;
 }
 
 .card:hover {
   transform: translateY(-1px);
-  box-shadow: 0 4px 6px rgba(0, 0, 0, 0.07), 0 2px 4px rgba(0, 0, 0, 0.05);
+  border-color: rgba(226, 232, 240, 0.8);
+  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.04);
 }
 
 .full-width {
@@ -382,20 +385,20 @@ const handleRetry = () => {
   align-items: center;
   justify-content: center;
   padding: 6px;
-  border: none;
+  border: 1px solid rgba(102, 126, 234, 0.3);
   border-radius: 6px;
   background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
   color: white;
   font-size: 14px;
   cursor: pointer;
   transition: all 0.2s ease;
-  box-shadow: 0 2px 6px rgba(102, 126, 234, 0.25);
+  box-shadow: 0 1px 3px rgba(102, 126, 234, 0.2);
   flex-shrink: 0;
 }
 
 .btn-copy:hover {
   transform: translateY(-1px);
-  box-shadow: 0 3px 8px rgba(102, 126, 234, 0.35);
+  box-shadow: 0 2px 4px rgba(102, 126, 234, 0.25);
 }
 
 .copy-icon {
@@ -409,8 +412,12 @@ const handleRetry = () => {
 
 /* 翻译结果卡片 - 新布局 */
 .translation-card {
-  background: linear-gradient(135deg, #f8fafc 0%, #f1f5f9 100%);
-  border: 1px solid #e2e8f0;
+  background: #fafbfc;
+  border-color: rgba(226, 232, 240, 0.8);
+}
+
+.translation-card:hover {
+  border-color: rgba(226, 232, 240, 1);
 }
 
 .translation-main {
@@ -444,8 +451,12 @@ const handleRetry = () => {
 
 /* 变量命名样式卡片 */
 .naming-card {
-  background: linear-gradient(135deg, #f8fafc 0%, #f1f5f9 100%);
-  border: 1px solid #e2e8f0;
+  background: #fafbfc;
+  border-color: rgba(226, 232, 240, 0.8);
+}
+
+.naming-card:hover {
+  border-color: rgba(226, 232, 240, 1);
 }
 
 .naming-styles {
@@ -460,7 +471,7 @@ const handleRetry = () => {
   gap: 8px;
   padding: 10px 14px;
   background: white;
-  border: 1px solid #e2e8f0;
+  border: 1px solid rgba(226, 232, 240, 0.6);
   border-radius: 8px;
   transition: all 0.2s ease;
   cursor: pointer;
@@ -468,10 +479,10 @@ const handleRetry = () => {
 }
 
 .naming-item:hover {
-  background: #f8fafc;
-  border-color: #667eea;
+  background: #fafbfc;
+  border-color: rgba(102, 126, 234, 0.5);
   transform: translateY(-1px);
-  box-shadow: 0 2px 4px rgba(102, 126, 234, 0.1);
+  box-shadow: 0 1px 3px rgba(102, 126, 234, 0.08);
 }
 
 .naming-item:active {
@@ -516,8 +527,12 @@ const handleRetry = () => {
 
 /* 合并的释义和例句卡片 */
 .combined-card {
-  background: linear-gradient(135deg, #f8fafc 0%, #f1f5f9 100%);
-  border: 1px solid #e2e8f0;
+  background: #fafbfc;
+  border-color: rgba(226, 232, 240, 0.8);
+}
+
+.combined-card:hover {
+  border-color: rgba(226, 232, 240, 1);
 }
 
 .section-group {
@@ -551,18 +566,26 @@ const handleRetry = () => {
 @media (prefers-color-scheme: dark) {
   .card {
     background: #1e293b;
-    box-shadow: 0 1px 3px rgba(0, 0, 0, 0.3), 0 1px 2px rgba(0, 0, 0, 0.2);
+    border-color: rgba(51, 65, 85, 0.6);
+    box-shadow: 0 1px 2px rgba(0, 0, 0, 0.2);
   }
 
   .card:hover {
-    box-shadow: 0 4px 6px rgba(0, 0, 0, 0.4), 0 2px 4px rgba(0, 0, 0, 0.3);
+    border-color: rgba(51, 65, 85, 0.8);
+    box-shadow: 0 2px 4px rgba(0, 0, 0, 0.25);
   }
 
   .translation-card,
   .naming-card,
   .combined-card {
-    background: linear-gradient(135deg, #1e293b 0%, #334155 100%);
-    border-color: #334155;
+    background: #0f172a;
+    border-color: rgba(51, 65, 85, 0.8);
+  }
+
+  .translation-card:hover,
+  .naming-card:hover,
+  .combined-card:hover {
+    border-color: rgba(51, 65, 85, 1);
   }
 
   .card-header h3 {
@@ -584,12 +607,12 @@ const handleRetry = () => {
 
   .naming-item {
     background: #0f172a;
-    border-color: #334155;
+    border-color: rgba(51, 65, 85, 0.6);
   }
 
   .naming-item:hover {
     background: #1e293b;
-    border-color: #667eea;
+    border-color: rgba(102, 126, 234, 0.6);
   }
 
   .naming-value {
@@ -602,7 +625,8 @@ const handleRetry = () => {
 
   .empty-state {
     background: #1e293b;
-    box-shadow: 0 1px 3px rgba(0, 0, 0, 0.3), 0 1px 2px rgba(0, 0, 0, 0.2);
+    border-color: rgba(51, 65, 85, 0.5);
+    box-shadow: 0 1px 2px rgba(0, 0, 0, 0.2);
   }
 }
 
