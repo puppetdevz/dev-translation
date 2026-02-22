@@ -1,5 +1,5 @@
 <script lang="ts" setup>
-import { ref, watch, nextTick } from 'vue'
+import { ref, watch, nextTick, onMounted } from 'vue'
 import InputArea from './components/InputArea.vue'
 import ResultDisplay from './components/ResultDisplay.vue'
 import KeyboardShortcuts from './components/KeyboardShortcuts.vue'
@@ -8,6 +8,7 @@ import {
   buildEnglishToChinesePrompt,
   buildPolishPrompt
 } from './prompts/index.js'
+import { loadSettings } from './utils/storage.js'
 
 const props = defineProps({
   enterAction: {
@@ -16,9 +17,19 @@ const props = defineProps({
   }
 })
 
+// 设置状态
+const settings = ref({
+  showPhonetic: true,
+  showDefinitions: true,
+  showExamples: true,
+  showVariableNaming: true,
+  showContextNote: true,
+})
+
 // 核心状态
 const inputText = ref('')
 const detectedLanguage = ref('')
+const inputType = ref('word') // 'word' 或 'sentence'
 const translationResult = ref(null)
 const isLoading = ref(false)
 const error = ref('')
@@ -36,17 +47,64 @@ const detectLanguage = (text) => {
   return chineseRatio > 0.3 ? 'zh' : 'en'
 }
 
+// 输入类型检测：单词/词组 vs 句子
+const detectInputType = (text) => {
+  if (!text || !text.trim()) return 'word'
+
+  const trimmed = text.trim()
+
+  // 检测中文
+  const chineseChars = trimmed.match(/[\u4e00-\u9fa5]/g)
+  const isChinese = chineseChars && chineseChars.length / trimmed.length > 0.3
+
+  if (isChinese) {
+    // 中文：检测是否有标点符号（句子特征）
+    const hasSentencePunctuation = /[。！？；，、]/.test(trimmed)
+    // 检测字数（中文词组通常较短）
+    const charCount = trimmed.length
+    // 如果有句子标点或字数超过阈值，认为是句子
+    return (hasSentencePunctuation || charCount > 10) ? 'sentence' : 'word'
+  } else {
+    // 英文：检测单词数量
+    const words = trimmed.split(/\s+/).filter(w => w.length > 0)
+    // 检测是否有句子标点
+    const hasSentencePunctuation = /[.!?;,\n]/.test(trimmed)
+
+    // 如果有句子标点或单词数超过阈值，认为是句子
+    return (hasSentencePunctuation || words.length > 5) ? 'sentence' : 'word'
+  }
+}
+
 // 解析 AI 响应
-const parseResult = (aiResponse) => {
+const parseResult = (aiResponse, type) => {
   try {
     // 尝试直接解析JSON
     const result = JSON.parse(aiResponse)
 
-    // 验证必需字段
-    if (!result.translation || !result.phonetic ||
-        !Array.isArray(result.definitions) ||
-        !Array.isArray(result.examples)) {
+    // 句子模式只需验证 translation 字段
+    if (type === 'sentence') {
+      if (!result.translation) {
+        throw new Error('Invalid result structure')
+      }
+      return result
+    }
+
+    // 单词/词组模式验证必需字段
+    if (!result.translation) {
       throw new Error('Invalid result structure')
+    }
+
+    // 兼容旧格式和新格式
+    // 新格式: definitions 是对象数组 [{pos, meaning, example, exampleTranslation}]
+    // 旧格式: definitions 是字符串数组，examples 是字符串数组
+    if (result.definitions && result.definitions.length > 0) {
+      if (typeof result.definitions[0] === 'string') {
+        // 旧格式，保持原样
+        if (!Array.isArray(result.examples)) {
+          throw new Error('Invalid result structure')
+        }
+      }
+      // 新格式无需额外验证
     }
 
     return result
@@ -95,15 +153,19 @@ const translate = async () => {
     const lang = detectLanguage(inputText.value)
     detectedLanguage.value = lang
 
+    // 检测输入类型
+    const type = detectInputType(inputText.value)
+    inputType.value = type
+
     const prompt = lang === 'zh'
-      ? buildChineseToEnglishPrompt(inputText.value)
-      : buildEnglishToChinesePrompt(inputText.value)
+      ? buildChineseToEnglishPrompt(inputText.value, type)
+      : buildEnglishToChinesePrompt(inputText.value, type)
 
     const result = await window.utools.ai({
       messages: [{ role: 'user', content: prompt }]
     })
 
-    translationResult.value = parseResult(result.content)
+    translationResult.value = parseResult(result.content, type)
   } catch (err) {
     console.error('Translation error:', err)
     error.value = err.message || '翻译失败，请重试'
@@ -164,12 +226,18 @@ const handleRejectPolish = () => {
   originalText.value = ''
 }
 
+// 打开设置页面
+const openSettings = () => {
+  window.utools?.redirect('设置', '')
+}
+
 // 清空输入
 const handleClear = () => {
   inputText.value = ''
   translationResult.value = null
   error.value = ''
   detectedLanguage.value = ''
+  inputType.value = 'word'
   polishedText.value = ''
   originalText.value = ''
 }
@@ -183,9 +251,11 @@ const handleRetry = () => {
 watch(inputText, (newValue) => {
   if (newValue && newValue.trim()) {
     detectedLanguage.value = detectLanguage(newValue)
+    inputType.value = detectInputType(newValue)
   } else {
     // 输入为空时，重置所有状态
     detectedLanguage.value = ''
+    inputType.value = 'word'
     translationResult.value = null
     error.value = ''
     polishedText.value = ''
@@ -200,10 +270,20 @@ watch(() => props.enterAction, (action) => {
     nextTick(() => translate())
   }
 }, { immediate: true })
+
+// 加载设置
+onMounted(() => {
+  settings.value = loadSettings()
+})
 </script>
 
 <template>
   <div class="translate-container">
+    <!-- 设置按钮 -->
+    <button class="settings-btn" @click="openSettings" title="设置">
+      <span>⚙️</span>
+    </button>
+
     <div class="translate-content">
       <div class="translate-input-section">
         <InputArea
@@ -225,6 +305,10 @@ watch(() => props.enterAction, (action) => {
           :result="translationResult"
           :isLoading="isLoading"
           :error="error"
+          :inputType="inputType"
+          :originalText="inputText"
+          :detectedLanguage="detectedLanguage"
+          :settings="settings"
           @retry="handleRetry"
         />
       </div>
@@ -244,6 +328,34 @@ watch(() => props.enterAction, (action) => {
   background: linear-gradient(135deg, #f8fafc 0%, #f1f5f9 100%);
   color: var(--text-primary, #1e293b);
   overflow: hidden;
+  position: relative;
+}
+
+/* 设置按钮 */
+.settings-btn {
+  position: absolute;
+  top: 16px;
+  right: 16px;
+  z-index: 10;
+  width: 36px;
+  height: 36px;
+  border: 1px solid rgba(226, 232, 240, 0.8);
+  background: rgba(255, 255, 255, 0.9);
+  backdrop-filter: blur(10px);
+  border-radius: 8px;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 18px;
+  transition: all 0.2s;
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.03);
+}
+
+.settings-btn:hover {
+  background: white;
+  transform: translateY(-1px) rotate(45deg);
+  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.04);
 }
 
 .translate-content {
@@ -251,8 +363,8 @@ watch(() => props.enterAction, (action) => {
   display: flex;
   flex-direction: column;
   overflow: hidden;
-  padding: 20px;
-  gap: 20px;
+  padding: 12px;
+  gap: 12px;
 }
 
 .translate-input-section {
@@ -288,7 +400,7 @@ watch(() => props.enterAction, (action) => {
 }
 
 .translate-footer {
-  padding: 12px 24px;
+  padding: 8px 16px;
   background: rgba(255, 255, 255, 0.7);
   backdrop-filter: blur(10px);
   border-top: 1px solid rgba(226, 232, 240, 0.6);
@@ -298,6 +410,17 @@ watch(() => props.enterAction, (action) => {
   .translate-container {
     background: linear-gradient(135deg, #0f172a 0%, #1e293b 100%);
     color: var(--text-primary, #f1f5f9);
+  }
+
+  .settings-btn {
+    background: rgba(30, 41, 59, 0.9);
+    border-color: rgba(51, 65, 85, 0.8);
+    box-shadow: 0 1px 2px rgba(0, 0, 0, 0.2);
+  }
+
+  .settings-btn:hover {
+    background: #1e293b;
+    box-shadow: 0 2px 4px rgba(0, 0, 0, 0.25);
   }
 
   .translate-footer {
@@ -326,15 +449,11 @@ watch(() => props.enterAction, (action) => {
   }
 }
 
-/* 小窗口优化 */
-@media (max-height: 600px) {
+/* 小窗口优化 - uTools 默认窗口 */
+@media (max-height: 550px) {
   .translate-content {
-    padding: 8px 16px;
+    padding: 10px;
     gap: 10px;
-  }
-
-  .translate-footer {
-    padding: 8px 16px;
   }
 
   /* 隐藏快捷键提示以节省空间 */

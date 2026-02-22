@@ -1,6 +1,7 @@
 <script lang="ts" setup>
 import { onMounted, ref } from 'vue';
 import Translate from './Translate/index.vue'
+import Settings from './Settings/index.vue'
 
 const route = ref('')
 const enterAction = ref({})
@@ -19,5 +20,8 @@ onMounted(() => {
 <template>
   <template v-if="route === 'translate'">
     <Translate :enterAction="enterAction"></Translate>
+  </template>
+  <template v-else-if="route === 'settings'">
+    <Settings></Settings>
   </template>
 </template>

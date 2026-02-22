@@ -182,10 +182,10 @@ const handleKeydown = (event) => {
 .input-area {
   display: flex;
   flex-direction: column;
-  gap: 12px;
+  gap: 10px;
   background: white;
   border-radius: 12px;
-  padding: 20px;
+  padding: 14px;
   border: 1px solid rgba(226, 232, 240, 0.8);
   box-shadow: 0 1px 2px rgba(0, 0, 0, 0.03);
   transition: all 0.3s ease;
@@ -244,8 +244,8 @@ const handleKeydown = (event) => {
 .input-textarea {
   width: 100%;
   flex: 1;
-  min-height: 100px;
-  padding: 16px;
+  min-height: 70px;
+  padding: 12px;
   border: 1px solid rgba(226, 232, 240, 0.6);
   border-radius: 10px;
   background-color: #fafbfc;
@@ -371,22 +371,23 @@ const handleKeydown = (event) => {
 .input-actions {
   display: flex;
   justify-content: flex-end;
-  gap: 12px;
+  gap: 8px;
 }
 
 .btn {
   display: flex;
   align-items: center;
-  gap: 6px;
-  padding: 10px 20px;
+  gap: 4px;
+  padding: 6px 12px;
   border: none;
-  border-radius: 10px;
-  font-size: 13px;
+  border-radius: 6px;
+  font-size: 12px;
   font-weight: 600;
   cursor: pointer;
   transition: all 0.2s ease;
   position: relative;
   overflow: hidden;
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.05);
 }
 
 .btn::before {
@@ -408,8 +409,7 @@ const handleKeydown = (event) => {
 }
 
 .btn-icon {
-  font-size: 16px;
-  filter: drop-shadow(0 1px 2px rgba(0, 0, 0, 0.1));
+  font-size: 13px;
 }
 
 .btn-text {
@@ -418,65 +418,63 @@ const handleKeydown = (event) => {
 }
 
 .btn-clear {
-  background: #f8fafc;
-  color: var(--text-primary, #4a5568);
-  border: 1px solid rgba(226, 232, 240, 0.8);
-  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.04);
+  background: #f1f5f9;
+  color: #475569;
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.05);
 }
 
 .btn-clear:hover:not(:disabled) {
-  background: #f1f5f9;
-  border-color: rgba(203, 213, 224, 1);
+  background: #e2e8f0;
   transform: translateY(-1px);
-  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.06);
+  box-shadow: 0 2px 3px rgba(0, 0, 0, 0.08);
 }
 
 .btn-polish {
-  background: linear-gradient(135deg, #f093fb 0%, #f5576c 100%);
+  background: #ec4899;
   color: white;
-  border: 1px solid rgba(240, 147, 251, 0.3);
-  box-shadow: 0 2px 6px rgba(240, 147, 251, 0.25);
+  box-shadow: 0 1px 2px rgba(236, 72, 153, 0.3);
 }
 
 .btn-polish:hover:not(:disabled) {
+  background: #db2777;
   transform: translateY(-1px);
-  box-shadow: 0 3px 8px rgba(240, 147, 251, 0.3);
+  box-shadow: 0 2px 3px rgba(236, 72, 153, 0.4);
 }
 
 .btn-translate {
-  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+  background: #6366f1;
   color: white;
-  border: 1px solid rgba(102, 126, 234, 0.3);
-  box-shadow: 0 2px 6px rgba(102, 126, 234, 0.25);
+  box-shadow: 0 1px 2px rgba(99, 102, 241, 0.3);
 }
 
 .btn-translate:hover:not(:disabled) {
+  background: #4f46e5;
   transform: translateY(-1px);
-  box-shadow: 0 3px 8px rgba(102, 126, 234, 0.3);
+  box-shadow: 0 2px 3px rgba(99, 102, 241, 0.4);
 }
 
 .btn-accept {
-  background: linear-gradient(135deg, #4ade80 0%, #22c55e 100%);
+  background: #10b981;
   color: white;
-  border: 1px solid rgba(74, 222, 128, 0.3);
-  box-shadow: 0 2px 6px rgba(74, 222, 128, 0.25);
+  box-shadow: 0 1px 2px rgba(16, 185, 129, 0.3);
 }
 
 .btn-accept:hover:not(:disabled) {
+  background: #059669;
   transform: translateY(-1px);
-  box-shadow: 0 3px 8px rgba(74, 222, 128, 0.3);
+  box-shadow: 0 2px 3px rgba(16, 185, 129, 0.4);
 }
 
 .btn-reject {
-  background: linear-gradient(135deg, #f87171 0%, #ef4444 100%);
+  background: #ef4444;
   color: white;
-  border: 1px solid rgba(248, 113, 113, 0.3);
-  box-shadow: 0 2px 6px rgba(248, 113, 113, 0.25);
+  box-shadow: 0 1px 2px rgba(239, 68, 68, 0.3);
 }
 
 .btn-reject:hover:not(:disabled) {
+  background: #dc2626;
   transform: translateY(-1px);
-  box-shadow: 0 3px 8px rgba(248, 113, 113, 0.3);
+  box-shadow: 0 2px 3px rgba(239, 68, 68, 0.4);
 }
 
 .btn:disabled {
@@ -570,13 +568,13 @@ const handleKeydown = (event) => {
 
   .btn-clear {
     background: #0f172a;
-    border-color: rgba(51, 65, 85, 0.8);
-    color: var(--text-primary, #f1f5f9);
+    color: #f1f5f9;
+    box-shadow: 0 1px 2px rgba(0, 0, 0, 0.3);
   }
 
   .btn-clear:hover:not(:disabled) {
     background: #1e293b;
-    border-color: rgba(71, 85, 105, 1);
+    box-shadow: 0 2px 3px rgba(0, 0, 0, 0.4);
   }
 }
 
@@ -613,8 +611,8 @@ const handleKeydown = (event) => {
   }
 
   .btn {
-    padding: 8px 16px;
-    font-size: 13px;
+    padding: 6px 12px;
+    font-size: 12px;
   }
 
   .language-badge {
@@ -624,7 +622,7 @@ const handleKeydown = (event) => {
 }
 
 /* 小窗口优化 */
-@media (max-height: 600px) {
+@media (max-height: 550px) {
   .input-area {
     padding: 10px;
     gap: 8px;
@@ -638,8 +636,8 @@ const handleKeydown = (event) => {
   }
 
   .btn {
-    padding: 6px 14px;
-    font-size: 12px;
+    padding: 5px 10px;
+    font-size: 11px;
   }
 
   .language-badge {

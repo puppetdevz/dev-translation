@@ -20,6 +20,16 @@
           "maxLength": 5000
         }
       ]
+    },
+    {
+      "code": "settings",
+      "explain": "翻译输出设置 - 自定义显示内容",
+      "cmds": [
+        "设置",
+        "settings",
+        "shezhi",
+        "翻译设置"
+      ]
     }
   ]
 }
