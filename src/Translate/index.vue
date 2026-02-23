@@ -8,7 +8,7 @@ import {
   buildEnglishToChinesePrompt,
   buildPolishPrompt
 } from './prompts/index.js'
-import { loadSettings } from './utils/storage.js'
+import { loadSettings, saveSettings } from './utils/storage.js'
 
 const props = defineProps({
   enterAction: {
@@ -231,6 +231,12 @@ const openSettings = () => {
   window.utools?.redirect('设置', '')
 }
 
+// 切换变量命名模式
+const toggleVariableNaming = () => {
+  settings.value = { ...settings.value, showVariableNaming: !settings.value.showVariableNaming }
+  saveSettings(settings.value)
+}
+
 // 清空输入
 const handleClear = () => {
   inputText.value = ''
@@ -279,11 +285,6 @@ onMounted(() => {
 
 <template>
   <div class="translate-container">
-    <!-- 设置按钮 -->
-    <button class="settings-btn" @click="openSettings" title="设置">
-      <span>⚙️</span>
-    </button>
-
     <div class="translate-content">
       <div class="translate-input-section">
         <InputArea
@@ -315,7 +316,21 @@ onMounted(() => {
     </div>
 
     <div class="translate-footer">
-      <KeyboardShortcuts />
+      <div class="footer-left">
+        <button
+          class="var-naming-btn"
+          :class="{ active: settings.showVariableNaming }"
+          @click="toggleVariableNaming"
+          title="编程变量命名模式"
+        >
+          <span class="btn-icon">{ }</span>
+          <span class="btn-label">变量命名</span>
+        </button>
+        <KeyboardShortcuts />
+      </div>
+      <button class="settings-btn" @click="openSettings" title="设置">
+        <span>⚙️</span>
+      </button>
     </div>
   </div>
 </template>
@@ -333,12 +348,8 @@ onMounted(() => {
 
 /* 设置按钮 */
 .settings-btn {
-  position: absolute;
-  top: 16px;
-  right: 16px;
-  z-index: 10;
-  width: 36px;
-  height: 36px;
+  width: 32px;
+  height: 32px;
   border: 1px solid rgba(226, 232, 240, 0.8);
   background: rgba(255, 255, 255, 0.9);
   backdrop-filter: blur(10px);
@@ -347,7 +358,7 @@ onMounted(() => {
   display: flex;
   align-items: center;
   justify-content: center;
-  font-size: 18px;
+  font-size: 16px;
   transition: all 0.2s;
   box-shadow: 0 1px 2px rgba(0, 0, 0, 0.03);
 }
@@ -404,12 +415,63 @@ onMounted(() => {
   background: rgba(255, 255, 255, 0.7);
   backdrop-filter: blur(10px);
   border-top: 1px solid rgba(226, 232, 240, 0.6);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  position: relative;
+}
+
+.footer-left {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.var-naming-btn {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 0 10px;
+  height: 32px;
+  border: 1px solid rgba(226, 232, 240, 0.8);
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.9);
+  color: var(--text-secondary, #64748b);
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.2s;
+  white-space: nowrap;
+}
+
+.var-naming-btn .btn-icon {
+  font-family: monospace;
+  font-size: 13px;
+  font-weight: 700;
+}
+
+.var-naming-btn:hover {
+  background: white;
+  border-color: rgba(99, 102, 241, 0.4);
+  color: #6366f1;
+}
+
+.var-naming-btn.active {
+  background: #6366f1;
+  border-color: #6366f1;
+  color: white;
+  box-shadow: 0 1px 3px rgba(99, 102, 241, 0.3);
 }
 
 @media (prefers-color-scheme: dark) {
   .translate-container {
     background: linear-gradient(135deg, #0f172a 0%, #1e293b 100%);
     color: var(--text-primary, #f1f5f9);
+  }
+
+  .translate-footer {
+    background: rgba(30, 41, 59, 0.8);
+    border-top: 1px solid rgba(51, 65, 85, 0.6);
   }
 
   .settings-btn {
@@ -423,9 +485,22 @@ onMounted(() => {
     box-shadow: 0 2px 4px rgba(0, 0, 0, 0.25);
   }
 
-  .translate-footer {
-    background: rgba(30, 41, 59, 0.8);
-    border-top: 1px solid rgba(51, 65, 85, 0.6);
+  .var-naming-btn {
+    background: rgba(30, 41, 59, 0.9);
+    border-color: rgba(51, 65, 85, 0.8);
+    color: var(--text-secondary, #94a3b8);
+  }
+
+  .var-naming-btn:hover {
+    background: #1e293b;
+    border-color: rgba(99, 102, 241, 0.5);
+    color: #a5b4fc;
+  }
+
+  .var-naming-btn.active {
+    background: #6366f1;
+    border-color: #6366f1;
+    color: white;
   }
 
   .translate-result-section::-webkit-scrollbar-thumb {

@@ -133,6 +133,30 @@ const keyword = computed(() => {
     return props.originalText
   }
 })
+
+// 生成变量命名样式
+const variableNames = computed(() => {
+  const text = props.result.translation
+  if (!text) return []
+
+  const words = text.trim()
+    .replace(/[-_]/g, ' ')
+    .split(/\s+/)
+    .filter(w => w.length > 0)
+    .map(w => w.toLowerCase())
+
+  if (words.length === 0) return []
+
+  const capitalize = (w) => w.charAt(0).toUpperCase() + w.slice(1)
+
+  return [
+    { label: 'camelCase', value: words[0] + words.slice(1).map(capitalize).join('') },
+    { label: 'PascalCase', value: words.map(capitalize).join('') },
+    { label: 'snake_case', value: words.join('_') },
+    { label: 'UPPER_CASE', value: words.join('_').toUpperCase() },
+    { label: 'kebab-case', value: words.join('-') },
+  ]
+})
 </script>
 
 <template>
@@ -144,12 +168,8 @@ const keyword = computed(() => {
         <span v-if="settings.showPhonetic && result.phonetic" class="phonetic">{{ result.phonetic }}</span>
       </div>
       <div class="word-actions">
-        <button
-          class="btn-speak"
-          :class="{ active: isSpeaking && speakingTarget === 'translation' }"
-          @click="speakTranslation"
-          :disabled="isSpeaking"
-        >
+        <button class="btn-speak" :class="{ active: isSpeaking && speakingTarget === 'translation' }"
+          @click="speakTranslation" :disabled="isSpeaking">
           <span class="speak-icon">{{ isSpeaking && speakingTarget === 'translation' ? '🔊' : '🔈' }}</span>
         </button>
         <button class="btn-copy-main" @click="copyText(result.translation)">
@@ -160,23 +180,30 @@ const keyword = computed(() => {
 
     <!-- 释义列表 -->
     <div v-if="settings.showDefinitions && formattedDefinitions.length > 0" class="definitions-section">
-      <div
-        v-for="(def, index) in formattedDefinitions"
-        :key="index"
-        class="definition-item"
-      >
+      <div v-for="(def, index) in formattedDefinitions" :key="index" class="definition-item">
         <div class="definition-header">
           <span v-if="def.pos" class="pos-tag">{{ def.pos }}</span>
           <span class="meaning">{{ def.meaning }}</span>
         </div>
         <div v-if="settings.showExamples && def.example" class="example-row">
-          <span
-            class="example-text"
-            v-html="highlightKeyword(def.example, keyword)"
-          ></span>
+          <span class="example-text" v-html="highlightKeyword(def.example, keyword)"></span>
           <span v-if="def.exampleTranslation" class="example-translation">
             {{ def.exampleTranslation }}
           </span>
+        </div>
+      </div>
+    </div>
+
+    <!-- 变量命名样式 -->
+    <div v-if="settings.showVariableNaming && variableNames.length > 0" class="variable-naming">
+      <div class="variable-header">
+        <span class="variable-icon">{ }</span>
+        <span class="variable-label">变量命名</span>
+      </div>
+      <div class="variable-list">
+        <div v-for="item in variableNames" :key="item.label" class="variable-item" @click="copyText(item.value)">
+          <span class="variable-format">{{ item.label }}</span>
+          <code class="variable-value">{{ item.value }}</code>
         </div>
       </div>
     </div>
@@ -199,12 +226,8 @@ const keyword = computed(() => {
       <div class="summary-content">
         <p class="summary-translation">{{ result.translation }}</p>
         <div class="summary-actions">
-          <button
-            class="btn-summary-speak"
-            :class="{ active: isSpeaking && speakingTarget === 'translation' }"
-            @click="speakTranslation"
-            :disabled="isSpeaking"
-          >
+          <button class="btn-summary-speak" :class="{ active: isSpeaking && speakingTarget === 'translation' }"
+            @click="speakTranslation" :disabled="isSpeaking">
             <span class="speak-icon">{{ isSpeaking && speakingTarget === 'translation' ? '🔊' : '🔈' }}</span>
           </button>
           <button class="btn-summary-copy" @click="copyText(result.translation)">
@@ -372,36 +395,96 @@ const keyword = computed(() => {
   line-height: 1.4;
 }
 
-/* 语境说明 */
-.context-note {
-  padding: 12px 14px;
-  background: #fafbfc;
+/* 变量命名样式 */
+.variable-naming {
+  padding: 10px 12px;
+  background: white;
   border-radius: 10px;
   border: 1px solid rgba(226, 232, 240, 0.6);
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.03);
 }
 
-.context-header {
+.variable-header {
   display: flex;
   align-items: center;
   gap: 6px;
-  margin-bottom: 6px;
+  margin-bottom: 8px;
 }
 
-.context-icon {
-  font-size: 14px;
+.variable-icon {
+  font-size: 13px;
+  font-weight: 700;
+  color: #6366f1;
+  font-family: monospace;
 }
 
-.context-label {
+.variable-label {
   font-size: 12px;
   font-weight: 600;
   color: var(--text-secondary, #64748b);
 }
 
-.context-text {
+.variable-list {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.variable-item {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 5px 8px;
+  border-radius: 6px;
+  cursor: pointer;
+  transition: background 0.15s ease;
+}
+
+.variable-item:hover {
+  background: rgba(99, 102, 241, 0.06);
+}
+
+.variable-format {
+  font-size: 11px;
+  color: var(--text-secondary, #94a3b8);
+  font-family: monospace;
+  width: 80px;
+  flex-shrink: 0;
+}
+
+.variable-value {
   font-size: 13px;
+  font-weight: 600;
   color: var(--text-primary, #1e293b);
-  line-height: 1.5;
-  margin: 0;
+  font-family: 'SFMono-Regular', Consolas, monospace;
+}
+
+/* 语境说明 */
+.context-note {
+
+  .context-header {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    margin-bottom: 6px;
+  }
+
+  .context-icon {
+    font-size: 14px;
+  }
+
+  .context-label {
+    font-size: 12px;
+    font-weight: 600;
+    color: var(--text-secondary, #64748b);
+  }
+
+  .context-text {
+    font-size: 13px;
+    color: var(--text-primary, #1e293b);
+    line-height: 1.5;
+    margin: 0;
+  }
 }
 
 /* 汇总卡片 */
@@ -484,8 +567,20 @@ const keyword = computed(() => {
 
 /* 深色模式 */
 @media (prefers-color-scheme: dark) {
-  .word-header {
+  .variable-naming {
     background: #1e293b;
+    border-color: rgba(51, 65, 85, 0.6);
+  }
+
+  .variable-item:hover {
+    background: rgba(99, 102, 241, 0.1);
+  }
+
+  .variable-value {
+    color: var(--text-primary, #f1f5f9);
+  }
+
+  .word-header {
     border-color: rgba(51, 65, 85, 0.6);
     box-shadow: 0 1px 2px rgba(0, 0, 0, 0.2);
   }
