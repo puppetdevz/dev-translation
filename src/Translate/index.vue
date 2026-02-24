@@ -3,6 +3,7 @@ import { ref, watch, nextTick, onMounted } from 'vue'
 import InputArea from './components/InputArea.vue'
 import ResultDisplay from './components/ResultDisplay.vue'
 import KeyboardShortcuts from './components/KeyboardShortcuts.vue'
+import SettingsPanel from './components/SettingsPanel.vue'
 import {
   buildChineseToEnglishPrompt,
   buildEnglishToChinesePrompt,
@@ -38,6 +39,9 @@ const error = ref('')
 const isPolishing = ref(false)
 const polishedText = ref('')
 const originalText = ref('')
+
+// 配置面板状态
+const showSettingsPanel = ref(false)
 
 // 语言检测
 const detectLanguage = (text) => {
@@ -226,9 +230,15 @@ const handleRejectPolish = () => {
   originalText.value = ''
 }
 
-// 打开设置页面
+// 打开设置面板
 const openSettings = () => {
-  window.utools?.redirect('设置', '')
+  showSettingsPanel.value = true
+}
+
+// 保存设置
+const handleSaveSettings = (newSettings) => {
+  settings.value = { ...newSettings }
+  saveSettings(settings.value)
 }
 
 // 切换变量命名模式
@@ -332,6 +342,13 @@ onMounted(() => {
         <span>⚙️</span>
       </button>
     </div>
+
+    <!-- 配置面板 -->
+    <SettingsPanel
+      v-model:visible="showSettingsPanel"
+      :settings="settings"
+      @save="handleSaveSettings"
+    />
   </div>
 </template>
 
