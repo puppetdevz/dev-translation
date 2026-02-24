@@ -126,7 +126,7 @@ const handleKeydown = (event) => {
         v-if="languageIndicator"
         @click="emit('languageToggle')"
         @contextmenu.prevent="emit('languageRedetect')"
-        :title="isManualOverride ? '已手动设置（右键重新识别）' : '点击切换方向'"
+        :title="isManualOverride ? '已手动设置\n左键: 切换方向 | 右键: 重新自动识别' : '左键: 切换方向 | 右键: 重新自动识别'"
       >
         <span class="badge-icon">{{ detectedLanguage === 'zh' ? '🇨🇳' : '🇺🇸' }}</span>
         <span class="badge-text">{{ languageIndicator }}</span>
