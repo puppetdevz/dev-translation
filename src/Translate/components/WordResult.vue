@@ -217,25 +217,6 @@ const variableNames = computed(() => {
       <p class="context-text">{{ result.contextNote }}</p>
     </div>
 
-    <!-- 汇总卡片 -->
-    <div class="summary-card">
-      <div class="summary-header">
-        <span class="summary-icon">📝</span>
-        <span class="summary-label">翻译结果</span>
-      </div>
-      <div class="summary-content">
-        <p class="summary-translation">{{ result.translation }}</p>
-        <div class="summary-actions">
-          <button class="btn-summary-speak" :class="{ active: isSpeaking && speakingTarget === 'translation' }"
-            @click="speakTranslation" :disabled="isSpeaking">
-            <span class="speak-icon">{{ isSpeaking && speakingTarget === 'translation' ? '🔊' : '🔈' }}</span>
-          </button>
-          <button class="btn-summary-copy" @click="copyText(result.translation)">
-            <span class="copy-icon">📋</span>
-          </button>
-        </div>
-      </div>
-    </div>
   </div>
 </template>
 
@@ -487,84 +468,6 @@ const variableNames = computed(() => {
   }
 }
 
-/* 汇总卡片 */
-.summary-card {
-  padding: 12px;
-  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-  border-radius: 12px;
-  color: white;
-}
-
-.summary-header {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  margin-bottom: 8px;
-}
-
-.summary-icon {
-  font-size: 14px;
-}
-
-.summary-label {
-  font-size: 12px;
-  font-weight: 600;
-  opacity: 0.9;
-}
-
-.summary-content {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  gap: 12px;
-}
-
-.summary-translation {
-  font-size: 16px;
-  font-weight: 700;
-  margin: 0;
-  flex: 1;
-  word-break: break-word;
-}
-
-.summary-actions {
-  display: flex;
-  gap: 8px;
-  flex-shrink: 0;
-}
-
-.btn-summary-speak,
-.btn-summary-copy {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  width: 32px;
-  height: 32px;
-  border: 1px solid rgba(255, 255, 255, 0.3);
-  border-radius: 8px;
-  background: rgba(255, 255, 255, 0.2);
-  color: white;
-  font-size: 14px;
-  cursor: pointer;
-  transition: all 0.2s ease;
-  backdrop-filter: blur(4px);
-}
-
-.btn-summary-speak:hover,
-.btn-summary-copy:hover {
-  background: rgba(255, 255, 255, 0.3);
-  transform: translateY(-1px);
-}
-
-.btn-summary-speak.active {
-  background: rgba(255, 255, 255, 0.4);
-}
-
-.btn-summary-speak:disabled {
-  opacity: 0.7;
-  cursor: not-allowed;
-}
-
 /* 深色模式 */
 @media (prefers-color-scheme: dark) {
   .variable-naming {
@@ -663,13 +566,6 @@ const variableNames = computed(() => {
     font-size: 12px;
   }
 
-  .summary-card {
-    padding: 12px 14px;
-  }
-
-  .summary-translation {
-    font-size: 16px;
-  }
 }
 
 /* 小窗口优化 */
@@ -705,14 +601,6 @@ const variableNames = computed(() => {
 
   .context-note {
     padding: 8px 10px;
-  }
-
-  .summary-card {
-    padding: 10px 12px;
-  }
-
-  .summary-translation {
-    font-size: 15px;
   }
 }
 </style>
