@@ -198,7 +198,7 @@ const variableNames = computed(() => {
     <!-- 变量命名样式 -->
     <div v-if="settings.showVariableNaming && variableNames.length > 0" class="variable-naming">
       <div class="variable-header">
-        <span class="variable-icon">{ }</span>
+        <!-- <span class="variable-icon">{ }</span> -->
         <span class="variable-label">变量命名</span>
       </div>
       <div class="variable-list">
@@ -393,17 +393,19 @@ const variableNames = computed(() => {
   margin-bottom: 8px;
 }
 
-.variable-icon {
-  font-size: 13px;
+/* .variable-icon {
+  font-size: 12px;
   font-weight: 700;
   color: #6366f1;
   font-family: monospace;
-}
+  line-height: 1;
+} */
 
 .variable-label {
   font-size: 12px;
   font-weight: 600;
   color: var(--text-secondary, #64748b);
+  line-height: 1;
 }
 
 .variable-list {
