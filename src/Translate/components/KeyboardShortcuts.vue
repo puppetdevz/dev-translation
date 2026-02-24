@@ -35,7 +35,7 @@
   flex-wrap: wrap;
   gap: 16px;
   align-items: center;
-  justify-content: flex-start;
+  justify-content: center;
 }
 
 .shortcut {
