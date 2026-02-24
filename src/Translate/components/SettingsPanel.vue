@@ -64,6 +64,34 @@ const toggleSetting = (key) => {
           <!-- 内容 -->
           <div class="settings-content">
             <div class="settings-section">
+              <h3 class="section-title">语言检测策略</h3>
+              <div class="settings-list">
+                <div
+                  class="setting-item strategy-item"
+                  :class="{ active: localSettings.detectionStrategy === 'regex' }"
+                  @click="localSettings.detectionStrategy = 'regex'"
+                >
+                  <div class="setting-info">
+                    <span class="setting-name">正则算法</span>
+                    <span class="setting-desc">基于字符占比快速识别，无需 AI 调用</span>
+                  </div>
+                  <span class="strategy-check" v-if="localSettings.detectionStrategy === 'regex'">✓</span>
+                </div>
+                <div
+                  class="setting-item strategy-item"
+                  :class="{ active: localSettings.detectionStrategy === 'ai' }"
+                  @click="localSettings.detectionStrategy = 'ai'"
+                >
+                  <div class="setting-info">
+                    <span class="setting-name">AI 模型</span>
+                    <span class="setting-desc">调用 AI 识别，更准确（有延迟）</span>
+                  </div>
+                  <span class="strategy-check" v-if="localSettings.detectionStrategy === 'ai'">✓</span>
+                </div>
+              </div>
+            </div>
+
+            <div class="settings-section">
               <h3 class="section-title">翻译输出设置</h3>
               <div class="settings-list">
                 <div class="setting-item">
@@ -283,6 +311,24 @@ const toggleSetting = (key) => {
   color: var(--text-secondary, #94a3b8);
 }
 
+/* 策略选择项 */
+.strategy-item {
+  cursor: pointer;
+  border: 1px solid transparent;
+}
+
+.strategy-item.active {
+  background: rgba(99, 102, 241, 0.08);
+  border-color: rgba(99, 102, 241, 0.3);
+}
+
+.strategy-check {
+  color: #6366f1;
+  font-weight: 700;
+  font-size: 16px;
+  flex-shrink: 0;
+}
+
 /* 开关按钮 */
 .toggle-switch {
   position: relative;
@@ -439,6 +485,11 @@ const toggleSetting = (key) => {
 
   .setting-desc {
     color: var(--text-secondary, #64748b);
+  }
+
+  .strategy-item.active {
+    background: rgba(99, 102, 241, 0.15);
+    border-color: rgba(99, 102, 241, 0.4);
   }
 
   .toggle-switch {

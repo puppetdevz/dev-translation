@@ -25,11 +25,13 @@ const settings = ref({
   showExamples: true,
   showVariableNaming: true,
   showContextNote: true,
+  detectionStrategy: 'regex',
 })
 
 // 核心状态
 const inputText = ref('')
 const detectedLanguage = ref('')
+const isManualOverride = ref(false)
 const inputType = ref('word') // 'word' 或 'sentence'
 const translationResult = ref(null)
 const isLoading = ref(false)
@@ -49,6 +51,41 @@ const detectLanguage = (text) => {
   const chineseChars = text.match(/[\u4e00-\u9fa5]/g)
   const chineseRatio = chineseChars ? chineseChars.length / text.length : 0
   return chineseRatio > 0.3 ? 'zh' : 'en'
+}
+
+// AI 语言检测
+const detectLanguageByAI = async (text) => {
+  const result = await window.utools.ai({
+    messages: [{ role: 'user', content: `只回复 "zh" 或 "en"，检测以下文本的语言：\n${text.slice(0, 300)}` }]
+  })
+  const content = result.content.trim().toLowerCase()
+  return content.includes('zh') ? 'zh' : 'en'
+}
+
+// 统一检测入口（AI 策略含 500ms 防抖）
+let detectionTimer = null
+const runDetection = (text) => {
+  if (!text || !text.trim()) return
+  if (settings.value.detectionStrategy === 'ai') {
+    clearTimeout(detectionTimer)
+    detectionTimer = setTimeout(async () => {
+      detectedLanguage.value = await detectLanguageByAI(text)
+    }, 500)
+  } else {
+    detectedLanguage.value = detectLanguage(text)
+  }
+}
+
+// 手动切换语言方向
+const handleLanguageToggle = () => {
+  detectedLanguage.value = detectedLanguage.value === 'zh' ? 'en' : 'zh'
+  isManualOverride.value = true
+}
+
+// 右键重新自动识别
+const handleLanguageRedetect = () => {
+  isManualOverride.value = false
+  runDetection(inputText.value)
 }
 
 // 输入类型检测：单词/词组 vs 句子
@@ -154,7 +191,8 @@ const translate = async () => {
   translationResult.value = null
 
   try {
-    const lang = detectLanguage(inputText.value)
+    // 使用当前检测到的语言（可能是手动设置的）
+    const lang = detectedLanguage.value || detectLanguage(inputText.value)
     detectedLanguage.value = lang
 
     // 检测输入类型
@@ -266,10 +304,13 @@ const handleRetry = () => {
 // 监听输入变化，实时检测语言并在输入为空时重置输出
 watch(inputText, (newValue) => {
   if (newValue && newValue.trim()) {
-    detectedLanguage.value = detectLanguage(newValue)
+    if (!isManualOverride.value) {
+      runDetection(newValue)
+    }
     inputType.value = detectInputType(newValue)
   } else {
     // 输入为空时，重置所有状态
+    isManualOverride.value = false
     detectedLanguage.value = ''
     inputType.value = 'word'
     translationResult.value = null
@@ -300,6 +341,7 @@ onMounted(() => {
         <InputArea
           v-model="inputText"
           :detectedLanguage="detectedLanguage"
+          :isManualOverride="isManualOverride"
           :isLoading="isLoading"
           :isPolishing="isPolishing"
           :polishedText="polishedText"
@@ -308,6 +350,8 @@ onMounted(() => {
           @polish="polish"
           @acceptPolish="handleAcceptPolish"
           @rejectPolish="handleRejectPolish"
+          @languageToggle="handleLanguageToggle"
+          @languageRedetect="handleLanguageRedetect"
         />
       </div>
 

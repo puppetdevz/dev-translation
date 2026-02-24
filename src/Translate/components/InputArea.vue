@@ -10,6 +10,10 @@ const props = defineProps({
     type: String,
     default: ''
   },
+  isManualOverride: {
+    type: Boolean,
+    default: false
+  },
   isLoading: {
     type: Boolean,
     default: false
@@ -24,7 +28,7 @@ const props = defineProps({
   }
 })
 
-const emit = defineEmits(['update:modelValue', 'translate', 'clear', 'polish', 'acceptPolish', 'rejectPolish'])
+const emit = defineEmits(['update:modelValue', 'translate', 'clear', 'polish', 'acceptPolish', 'rejectPolish', 'languageToggle', 'languageRedetect'])
 
 // 输入框引用
 const textareaRef = ref(null)
@@ -117,9 +121,16 @@ const handleKeydown = (event) => {
 
     <!-- 输入框下方的提示信息 -->
     <div class="input-footer" v-if="!polishedText">
-      <div class="language-badge" v-if="languageIndicator">
+      <div class="language-badge"
+        :class="{ 'manual-override': isManualOverride }"
+        v-if="languageIndicator"
+        @click="emit('languageToggle')"
+        @contextmenu.prevent="emit('languageRedetect')"
+        :title="isManualOverride ? '已手动设置（右键重新识别）' : '点击切换方向'"
+      >
         <span class="badge-icon">{{ detectedLanguage === 'zh' ? '🇨🇳' : '🇺🇸' }}</span>
         <span class="badge-text">{{ languageIndicator }}</span>
+        <span v-if="isManualOverride" class="badge-manual">🔒</span>
       </div>
       <span class="char-count" :class="{ 'char-count-warning': charCount > 4500 }">
         字符数: {{ charCount }}/5000
@@ -219,6 +230,24 @@ const handleKeydown = (event) => {
   color: white;
   box-shadow: 0 1px 3px rgba(102, 126, 234, 0.2);
   animation: fadeIn 0.3s ease;
+  cursor: pointer;
+  user-select: none;
+  transition: opacity 0.2s, transform 0.2s;
+}
+
+.language-badge:hover {
+  opacity: 0.85;
+  transform: scale(1.02);
+}
+
+.language-badge.manual-override {
+  background: linear-gradient(135deg, #f59e0b 0%, #d97706 100%);
+  box-shadow: 0 1px 3px rgba(245, 158, 11, 0.3);
+}
+
+.badge-manual {
+  font-size: 10px;
+  opacity: 0.9;
 }
 
 .badge-icon {

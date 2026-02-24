@@ -12,6 +12,7 @@ const DEFAULT_SETTINGS = {
   showExamples: true,           // 显示例句
   showVariableNaming: true,     // 显示变量命名样式
   showContextNote: true,        // 显示上下文说明
+  detectionStrategy: 'regex',   // 语言检测策略: 'regex' | 'ai'
 }
 
 /**

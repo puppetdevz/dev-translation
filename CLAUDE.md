@@ -170,6 +170,7 @@ pnpm build
      - 显示例句（showExamples）
      - 显示变量命名（showVariableNaming）
      - 显示语境说明（showContextNote）
+   - **语言检测策略**（detectionStrategy）：正则算法 / AI 模型单选
    - 使用 Toggle Switch 开关组件控制各项设置
    - 支持取消和确定操作
    - 设置实时保存到 dbStorage
@@ -344,6 +345,12 @@ await window.utools.ai({ messages }, (chunk) => {
 ### 翻译功能实现细节
 
 **语言检测**：
+- 支持两种检测策略，可在设置面板中切换：
+  - **正则算法**（默认）：基于中文字符占比（> 30% 判定为中文），快速无延迟
+  - **AI 模型**：调用 uTools AI API 识别语言，更准确，含 500ms 防抖
+- 支持手动覆盖：左键点击语言徽章切换方向（徽章变橙色 + 🔒），右键重新自动识别
+- 手动覆盖后输入变化不触发自动检测，清空输入时自动重置覆盖状态
+
 ```javascript
 const detectLanguage = (text) => {
   const chineseChars = text.match(/[\u4e00-\u9fa5]/g)
