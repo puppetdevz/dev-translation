@@ -2,7 +2,7 @@
 
 一个专为开发者设计的智能翻译工具，提供中英文互译、文本润色、变量命名等实用功能。
 
-![Dev Translation](./previews/image.png)
+![Dev Translation](./previews/main.png)
 
 ## 🌟 核心特性
 

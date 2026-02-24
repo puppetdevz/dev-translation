@@ -49,8 +49,10 @@ pnpm build
 │           ├── ResultDisplay.vue       # 结果展示组件
 │           └── KeyboardShortcuts.vue   # 快捷键提示组件
 ├── documents/               # 文档资源
-│   ├── image.png           # 项目截图
 │   ├── introduce.md        # 插件介绍文档
+│   ├── previews/           # 预览截图
+│   │   ├── main.png        # 主界面截图
+│   │   └── settings.png    # 设置面板截图
 │   └── updates/            # 版本更新文档
 │       └── 1.0.0.md        # 1.0.0 版本更新说明
 ├── .claude/                 # Claude Code 配置
