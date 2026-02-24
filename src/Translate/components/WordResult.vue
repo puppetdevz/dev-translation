@@ -136,7 +136,8 @@ const keyword = computed(() => {
 
 // 生成变量命名样式
 const variableNames = computed(() => {
-  const text = props.result.translation
+  // 英译中时用英文原文，中译英时用英文翻译结果
+  const text = props.detectedLanguage === 'en' ? props.originalText : props.result.translation
   if (!text) return []
 
   const words = text.trim()
