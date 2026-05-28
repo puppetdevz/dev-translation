@@ -1,6 +1,7 @@
 <script lang="ts" setup>
 import { computed } from 'vue'
 import WordResult from './WordResult.vue'
+import { copyText } from '../utils/clipboard.js'
 
 const props = defineProps({
   result: {
@@ -40,17 +41,6 @@ const props = defineProps({
 })
 
 const emit = defineEmits(['retry'])
-
-const copyText = async (text) => {
-  try {
-    await navigator.clipboard.writeText(text)
-    const displayText = text.length > 30 ? text.substring(0, 30) + '...' : text
-    window.utools.showNotification(`已复制: ${displayText}`)
-  } catch (err) {
-    console.error('Copy failed:', err)
-    window.utools.showNotification('复制失败')
-  }
-}
 
 const handleRetry = () => {
   emit('retry')

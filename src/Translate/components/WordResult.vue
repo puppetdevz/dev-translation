@@ -1,5 +1,6 @@
 <script lang="ts" setup>
 import { computed, ref } from 'vue'
+import { copyText } from '../utils/clipboard.js'
 
 const props = defineProps({
   result: {
@@ -88,17 +89,13 @@ const highlightKeyword = (sentence, keyword) => {
   return sentence.replace(regex, '<mark class="highlight">$1</mark>')
 }
 
-// 复制文本
-const copyText = async (text) => {
-  try {
-    await navigator.clipboard.writeText(text)
-    const displayText = text.length > 30 ? text.substring(0, 30) + '...' : text
-    window.utools.showNotification(`已复制: ${displayText}`)
-  } catch (err) {
-    console.error('Copy failed:', err)
-    window.utools.showNotification('复制失败')
-  }
+// 获取英文源文本（变量命名和例句高亮都需要英文）
+const getEnglishSource = () => {
+  return props.detectedLanguage === 'zh' ? props.result.translation : props.originalText
 }
+
+// 获取关键词（用于高亮）
+const keyword = computed(() => getEnglishSource())
 
 // 检查 definitions 是否为新格式（对象数组）
 const isDefinitionNewFormat = computed(() => {
@@ -123,21 +120,9 @@ const formattedDefinitions = computed(() => {
   }))
 })
 
-// 获取关键词（用于高亮）
-const keyword = computed(() => {
-  if (props.detectedLanguage === 'zh') {
-    // 中译英：翻译结果是英文，用于例句高亮
-    return props.result.translation
-  } else {
-    // 英译中：原文是英文，用于例句高亮
-    return props.originalText
-  }
-})
-
 // 生成变量命名样式
 const variableNames = computed(() => {
-  // 英译中时用英文原文，中译英时用英文翻译结果
-  const text = props.detectedLanguage === 'en' ? props.originalText : props.result.translation
+  const text = getEnglishSource()
   if (!text) return []
 
   const words = text.trim()
@@ -198,7 +183,6 @@ const variableNames = computed(() => {
     <!-- 变量命名样式 -->
     <div v-if="settings.showVariableNaming && variableNames.length > 0" class="variable-naming">
       <div class="variable-header">
-        <!-- <span class="variable-icon">{ }</span> -->
         <span class="variable-label">变量命名</span>
       </div>
       <div class="variable-list">
@@ -392,14 +376,6 @@ const variableNames = computed(() => {
   gap: 6px;
   margin-bottom: 8px;
 }
-
-/* .variable-icon {
-  font-size: 12px;
-  font-weight: 700;
-  color: #6366f1;
-  font-family: monospace;
-  line-height: 1;
-} */
 
 .variable-label {
   font-size: 12px;
