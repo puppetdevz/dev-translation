@@ -1,0 +1,31 @@
+- generic [ref=e3]:
+  - generic [ref=e6]:
+    - textbox "请输入要翻译的内容..." [active] [ref=e7]
+    - generic [ref=e9]: "字符数: 0/5000"
+    - generic [ref=e10]:
+      - button "🗑️ 清空" [disabled] [ref=e11]:
+        - generic [ref=e12]: 🗑️
+        - generic [ref=e13]: 清空
+      - button "✨ 润色" [disabled] [ref=e14]:
+        - generic [ref=e15]: ✨
+        - generic [ref=e16]: 润色
+      - button "🌐 翻译" [disabled] [ref=e17]:
+        - generic [ref=e18]: 🌐
+        - generic [ref=e19]: 翻译
+  - generic [ref=e23]:
+    - button "</>" [ref=e24] [cursor=pointer]:
+      - generic [ref=e25]: </>
+    - generic [ref=e28]:
+      - generic [ref=e29]:
+        - generic [ref=e30]: Enter
+        - generic [ref=e31]: 翻译
+      - generic [ref=e33]:
+        - generic [ref=e34]: Shift
+        - generic [ref=e35]: +
+        - generic [ref=e36]: Enter
+        - generic [ref=e37]: 换行
+      - generic [ref=e39]:
+        - generic [ref=e40]: Esc
+        - generic [ref=e41]: 关闭
+    - button "⚙️" [ref=e42] [cursor=pointer]:
+      - generic [ref=e43]: ⚙️

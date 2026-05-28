@@ -80,6 +80,7 @@
 
 <script setup>
 import { ref, onMounted } from 'vue'
+import { useRouter } from 'vue-router'
 import { loadSettings, saveSettings, resetSettings } from '../Translate/utils/storage.js'
 
 const settings = ref({
@@ -111,8 +112,14 @@ const handleReset = () => {
 }
 
 // 返回翻译界面
+const router = useRouter()
+
 const goBack = () => {
-  window.utools?.redirect('翻译', '')
+  if (window.utools) {
+    window.utools.redirect('翻译', '')
+  } else {
+    router.push({ name: 'translate' })
+  }
 }
 </script>
 
