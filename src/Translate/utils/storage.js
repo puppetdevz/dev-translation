@@ -47,20 +47,3 @@ export const saveSettings = (settings) => {
   }
 }
 
-/**
- * 重置设置为默认值
- * @returns {Object} 默认设置对象
- */
-export const resetSettings = () => {
-  const defaultSettings = { ...DEFAULT_SETTINGS }
-  saveSettings(defaultSettings)
-  return defaultSettings
-}
-
-/**
- * 获取默认设置（用于重置按钮显示）
- * @returns {Object} 默认设置对象
- */
-export const getDefaultSettings = () => {
-  return { ...DEFAULT_SETTINGS }
-}
