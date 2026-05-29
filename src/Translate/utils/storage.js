@@ -13,6 +13,7 @@ const DEFAULT_SETTINGS = {
   showVariableNaming: true,     // 显示变量命名样式
   showContextNote: true,        // 显示上下文说明
   detectionStrategy: 'regex',   // 语言检测策略: 'regex' | 'ai'
+  translationEngine: 'ai',     // 翻译引擎: 'ai' | 'google'
 }
 
 /**
