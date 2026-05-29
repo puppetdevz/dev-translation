@@ -3,7 +3,6 @@ import { ref, watch, nextTick, onMounted } from 'vue'
 import { useRouter } from 'vue-router'
 import InputArea from './components/InputArea.vue'
 import ResultDisplay from './components/ResultDisplay.vue'
-import KeyboardShortcuts from './components/KeyboardShortcuts.vue'
 import {
   buildChineseToEnglishPrompt,
   buildEnglishToChinesePrompt,
@@ -39,7 +38,7 @@ const originalText = ref('')
 // 语言检测
 const detectLanguage = (text) => {
   if (!text || !text.trim()) return ''
-  const chineseChars = text.match(/[\u4e00-\u9fa5]/g)
+  const chineseChars = text.match(/[一-龥]/g)
   const chineseRatio = chineseChars ? chineseChars.length / text.length : 0
   return chineseRatio > 0.3 ? 'zh' : 'en'
 }
@@ -86,7 +85,7 @@ const detectInputType = (text) => {
   const trimmed = text.trim()
 
   // 检测中文
-  const chineseChars = trimmed.match(/[\u4e00-\u9fa5]/g)
+  const chineseChars = trimmed.match(/[一-龥]/g)
   const isChinese = chineseChars && chineseChars.length / trimmed.length > 0.3
 
   if (isChinese) {
@@ -319,6 +318,11 @@ const toggleTranslationEngine = () => {
     settings.translationEngine === 'ai' ? 'google' : 'ai')
 }
 
+// 打开 GitHub 仓库
+const openGitHub = () => {
+  window.utools.shellOpenExternal('https://github.com/puppetdevz/dev-translation')
+}
+
 // 清空输入
 const handleClear = () => {
   inputText.value = ''
@@ -418,7 +422,7 @@ watch(() => props.enterAction, (action) => {
         </button>
       </div>
       <div class="footer-center">
-        <KeyboardShortcuts />
+        <a class="github-star-link" @click="openGitHub">⭐ 好用就 Star，不好用提 Issue</a>
       </div>
       <button class="settings-btn" @click="openSettings" title="设置">
         <span>⚙️</span>
@@ -518,6 +522,20 @@ watch(() => props.enterAction, (action) => {
   display: flex;
   justify-content: center;
   align-items: center;
+}
+
+.github-star-link {
+  font-size: 13px;
+  color: var(--text-secondary, #64748b);
+  text-decoration: none;
+  transition: all 0.2s;
+  cursor: pointer;
+  user-select: none;
+}
+
+.github-star-link:hover {
+  color: #6366f1;
+  transform: translateY(-1px);
 }
 
 .var-naming-btn {
@@ -654,6 +672,10 @@ watch(() => props.enterAction, (action) => {
     color: white;
   }
 
+  .github-star-link:hover {
+    color: #a5b4fc;
+  }
+
   .translate-result-section::-webkit-scrollbar-thumb {
     background: rgba(255, 255, 255, 0.2);
   }
@@ -682,7 +704,6 @@ watch(() => props.enterAction, (action) => {
     gap: 10px;
   }
 
-  /* 隐藏快捷键提示以节省空间 */
   .translate-footer {
     display: none;
   }
