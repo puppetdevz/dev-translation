@@ -1,15 +1,15 @@
 <script lang="ts" setup>
 import { ref, watch, nextTick, onMounted } from 'vue'
+import { useRouter } from 'vue-router'
 import InputArea from './components/InputArea.vue'
 import ResultDisplay from './components/ResultDisplay.vue'
 import KeyboardShortcuts from './components/KeyboardShortcuts.vue'
-import SettingsPanel from './components/SettingsPanel.vue'
 import {
   buildChineseToEnglishPrompt,
   buildEnglishToChinesePrompt,
   buildPolishPrompt
 } from './prompts/index.js'
-import { loadSettings, saveSettings } from './utils/storage.js'
+import { useSettings } from './utils/useSettings.js'
 
 const props = defineProps({
   enterAction: {
@@ -19,15 +19,8 @@ const props = defineProps({
 })
 
 // 设置状态
-const settings = ref({
-  showPhonetic: true,
-  showDefinitions: true,
-  showExamples: true,
-  showVariableNaming: true,
-  showContextNote: true,
-  detectionStrategy: 'regex',
-  translationEngine: 'ai',
-})
+const router = useRouter()
+const { settings, toggleSetting, updateSetting } = useSettings()
 
 // 核心状态
 const inputText = ref('')
@@ -42,9 +35,6 @@ const error = ref('')
 const isPolishing = ref(false)
 const polishedText = ref('')
 const originalText = ref('')
-
-// 配置面板状态
-const showSettingsPanel = ref(false)
 
 // 语言检测
 const detectLanguage = (text) => {
@@ -67,7 +57,7 @@ const detectLanguageByAI = async (text) => {
 let detectionTimer = null
 const runDetection = (text) => {
   if (!text || !text.trim()) return
-  if (settings.value.detectionStrategy === 'ai') {
+  if (settings.detectionStrategy === 'ai') {
     clearTimeout(detectionTimer)
     detectionTimer = setTimeout(async () => {
       detectedLanguage.value = await detectLanguageByAI(text)
@@ -234,7 +224,7 @@ const translate = async () => {
   translationResult.value = null
 
   try {
-    if (settings.value.translationEngine === 'google') {
+    if (settings.translationEngine === 'google') {
       translationResult.value = await translateWithGoogle()
       return
     }
@@ -314,29 +304,19 @@ const handleRejectPolish = () => {
   originalText.value = ''
 }
 
-// 打开设置面板
+// 打开设置页面
 const openSettings = () => {
-  showSettingsPanel.value = true
-}
-
-// 保存设置
-const handleSaveSettings = (newSettings) => {
-  settings.value = { ...newSettings }
-  saveSettings(settings.value)
+  router.push({ name: 'settings' })
 }
 
 // 切换变量命名模式
 const toggleVariableNaming = () => {
-  settings.value = { ...settings.value, showVariableNaming: !settings.value.showVariableNaming }
-  saveSettings(settings.value)
+  toggleSetting('showVariableNaming')
 }
 
 const toggleTranslationEngine = () => {
-  settings.value = {
-    ...settings.value,
-    translationEngine: settings.value.translationEngine === 'ai' ? 'google' : 'ai',
-  }
-  saveSettings(settings.value)
+  updateSetting('translationEngine',
+    settings.translationEngine === 'ai' ? 'google' : 'ai')
 }
 
 // 清空输入
@@ -381,11 +361,6 @@ watch(() => props.enterAction, (action) => {
     nextTick(() => translate())
   }
 }, { immediate: true })
-
-// 加载设置
-onMounted(() => {
-  settings.value = loadSettings()
-})
 </script>
 
 <template>
@@ -449,13 +424,6 @@ onMounted(() => {
         <span>⚙️</span>
       </button>
     </div>
-
-    <!-- 配置面板 -->
-    <SettingsPanel
-      v-model:visible="showSettingsPanel"
-      :settings="settings"
-      @save="handleSaveSettings"
-    />
   </div>
 </template>
 
