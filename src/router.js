@@ -7,6 +7,11 @@ const routes = [
     component: () => import('./Translate/index.vue'),
   },
   {
+    path: '/settings',
+    name: 'settings',
+    component: () => import('./Translate/components/SettingsPage.vue'),
+  },
+  {
     path: '/',
     redirect: '/translate',
   },
