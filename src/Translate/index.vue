@@ -174,6 +174,53 @@ const parseResult = (aiResponse, type) => {
   }
 }
 
+// Google 翻译 + 词典补充
+const translateWithGoogle = async () => {
+  const lang = detectedLanguage.value || detectLanguage(inputText.value)
+  detectedLanguage.value = lang
+
+  const type = detectInputType(inputText.value)
+  inputType.value = type
+
+  // 检查 preload 是否可用
+  if (!window.services || !window.services.googleTranslate) {
+    throw new Error('Google 翻译不可用，请切换至 AI 模式')
+  }
+
+  const isEnToZh = lang === 'en'
+
+  if (type === 'sentence') {
+    const fromLang = isEnToZh ? 'en' : 'zh-CN'
+    const toLang = isEnToZh ? 'zh-CN' : 'en'
+    const translation = await window.services.googleTranslate(inputText.value.trim(), fromLang, toLang)
+    return { translation }
+  }
+
+  if (isEnToZh) {
+    // 英译中：翻译和词典并行
+    const [translation, dict] = await Promise.all([
+      window.services.googleTranslate(inputText.value.trim(), 'en', 'zh-CN'),
+      window.services.lookupWord(inputText.value.trim()),
+    ])
+    return {
+      translation,
+      phonetic: dict.phonetic || '',
+      definitions: dict.definitions || [],
+      examples: dict.examples || [],
+    }
+  } else {
+    // 中译英：先翻译拿到英文译文，再查词典
+    const translation = await window.services.googleTranslate(inputText.value.trim(), 'zh-CN', 'en')
+    const dict = await window.services.lookupWord(translation)
+    return {
+      translation,
+      phonetic: dict.phonetic || '',
+      definitions: dict.definitions || [],
+      examples: dict.examples || [],
+    }
+  }
+}
+
 // 翻译函数
 const translate = async () => {
   if (!inputText.value || !inputText.value.trim()) {
@@ -191,11 +238,15 @@ const translate = async () => {
   translationResult.value = null
 
   try {
-    // 使用当前检测到的语言（可能是手动设置的）
+    if (settings.value.translationEngine === 'google') {
+      translationResult.value = await translateWithGoogle()
+      return
+    }
+
+    // AI 路径（现有逻辑，不变）
     const lang = detectedLanguage.value || detectLanguage(inputText.value)
     detectedLanguage.value = lang
 
-    // 检测输入类型
     const type = detectInputType(inputText.value)
     inputType.value = type
 
