@@ -1,6 +1,6 @@
 # AGENTS.md
 
-This file provides guidance to Codex (Codex.ai/code) when working with code in this repository.
+This file provides guidance to Claude Code (Codex.ai/code) when working with code in this repository.
 
 ## 项目概述
 
@@ -47,21 +47,20 @@ pnpm build
 │       └── components/      # 翻译子组件
 │           ├── InputArea.vue           # 输入区域组件
 │           ├── ResultDisplay.vue       # 结果展示组件
+│           ├── SettingsPage.vue        # 设置页面组件
 │           └── KeyboardShortcuts.vue   # 快捷键提示组件
-├── documents/               # 文档资源
-│   ├── introduce.md        # 插件介绍文档
-│   ├── previews/           # 预览截图
-│   │   ├── main.png        # 主界面截图
-│   │   └── settings.png    # 设置面板截图
-│   └── updates/            # 版本更新文档
-│       └── 1.0.0.md        # 1.0.0 版本更新说明
-├── .Codex/                 # Codex 配置
-│   └── skills/             # Codex Skills
+├── assets/                   # 截图资源
+│   ├── main.png             # 主界面截图
+│   └── settings.png         # 设置页面截图
+├── .claude/                 # Claude Code 配置
+│   └── skills/             # Claude Code Skills
 │       └── release.md      # 发布流程 Skill
 ├── index.html               # HTML 入口
 ├── vite.config.js           # Vite 配置
 ├── jsconfig.json            # JS 配置（包含 utools-api-types）
-├── AGENTS.md                # 项目架构和开发指南
+├── README.md                # 项目介绍
+├── CHANGELOG.md             # 版本更新记录
+├── CLAUDE.md                # 项目架构和开发指南
 └── TESTING.md               # 测试指南
 ```
 
@@ -533,13 +532,13 @@ const detectLanguage = (text) => {
     - 使用 `box-sizing: border-box` 确保尺寸计算正确
     - 禁用用户可调整大小的元素（如 `resize: none`）
 
-## Codex Skills
+## Claude Code Skills
 
-项目中配置了以下 Codex Skills，用于自动化常见任务：
+项目中配置了以下 Claude Code Skills，用于自动化常见任务：
 
 ### Release Skill
 
-**位置**: `.Codex/skills/release.md`
+**位置**: `.claude/skills/release.md`
 
 **用途**: 自动化版本发布流程，生成版本文档并更新项目配置。
 
@@ -559,12 +558,12 @@ const detectLanguage = (text) => {
 **执行流程**:
 
 1. **验证版本号格式**: 检查版本号是否符合语义化版本规范
-2. **读取项目信息**: 读取 `package.json`、`plugin.json`、`AGENTS.md` 等文件
-3. **生成版本更新文档**: 创建 `documents/updates/{version}.md` 文件
+2. **读取项目信息**: 读取 `package.json`、`plugin.json`、`CLAUDE.md` 等文件
+3. **生成版本更新文档**: 更新 `CHANGELOG.md` 文件，添加新版本记录
    - 包含版本概述、新增功能、改进优化、问题修复等章节
    - 使用 emoji 图标增强可读性
    - 保持专业且友好的语气
-4. **更新插件介绍文档**: 更新 `documents/introduce.md` 文件
+4. **更新插件介绍文档**: 更新 `README.md` 文件
    - 在版本历史部分添加新版本记录
    - 保持与版本更新文档的一致性
 5. **更新版本号（可选）**: 询问是否更新 `package.json` 和 `plugin.json` 中的版本号
@@ -577,7 +576,7 @@ const detectLanguage = (text) => {
   - 主版本号（Major）：不兼容的 API 修改
   - 次版本号（Minor）：向下兼容的功能性新增
   - 修订号（Patch）：向下兼容的问题修正
-- 内容应准确反映实际功能，与 AGENTS.md 保持一致
+- 内容应准确反映实际功能，与 CLAUDE.md 保持一致
 
 **发布检查清单**:
 
