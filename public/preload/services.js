@@ -1,8 +1,28 @@
 const fs = require('node:fs')
 const path = require('node:path')
+const { googletrans } = require('googletrans')
 
 // 通过 window 对象向渲染进程注入 nodejs 能力
 window.services = {
+  // Google 翻译（Node.js 层调用 googletrans）
+  googleTranslate (text, from, to) {
+    return new Promise((resolve, reject) => {
+      const options = { from, to }
+      const timer = setTimeout(() => {
+        reject(new Error('Google 翻译超时，请切换至 AI 模式重试'))
+      }, 10000)
+
+      googletrans(text, options)
+        .then(result => {
+          clearTimeout(timer)
+          resolve(result.text)
+        })
+        .catch(err => {
+          clearTimeout(timer)
+          reject(new Error('Google 翻译失败，请切换至 AI 模式重试: ' + err.message))
+        })
+    })
+  },
   // 读文件
   readFile (file) {
     return fs.readFileSync(file, { encoding: 'utf-8' })
