@@ -26,6 +26,7 @@ const settings = ref({
   showVariableNaming: true,
   showContextNote: true,
   detectionStrategy: 'regex',
+  translationEngine: 'ai',
 })
 
 // 核心状态
@@ -174,7 +175,6 @@ const parseResult = (aiResponse, type) => {
   }
 }
 
-// Google 翻译 + 词典补充
 const translateWithGoogle = async () => {
   const lang = detectedLanguage.value || detectLanguage(inputText.value)
   detectedLanguage.value = lang
@@ -182,7 +182,6 @@ const translateWithGoogle = async () => {
   const type = detectInputType(inputText.value)
   inputType.value = type
 
-  // 检查 preload 是否可用
   if (!window.services || !window.services.googleTranslate) {
     throw new Error('Google 翻译不可用，请切换至 AI 模式')
   }
@@ -197,7 +196,6 @@ const translateWithGoogle = async () => {
   }
 
   if (isEnToZh) {
-    // 英译中：翻译和词典并行
     const [translation, dict] = await Promise.all([
       window.services.googleTranslate(inputText.value.trim(), 'en', 'zh-CN'),
       window.services.lookupWord(inputText.value.trim()),
@@ -209,7 +207,6 @@ const translateWithGoogle = async () => {
       examples: dict.examples || [],
     }
   } else {
-    // 中译英：先翻译拿到英文译文，再查词典
     const translation = await window.services.googleTranslate(inputText.value.trim(), 'zh-CN', 'en')
     const dict = await window.services.lookupWord(translation)
     return {
@@ -221,7 +218,6 @@ const translateWithGoogle = async () => {
   }
 }
 
-// 翻译函数
 const translate = async () => {
   if (!inputText.value || !inputText.value.trim()) {
     error.value = '请输入要翻译的内容'
@@ -243,7 +239,6 @@ const translate = async () => {
       return
     }
 
-    // AI 路径（现有逻辑，不变）
     const lang = detectedLanguage.value || detectLanguage(inputText.value)
     detectedLanguage.value = lang
 
@@ -336,7 +331,6 @@ const toggleVariableNaming = () => {
   saveSettings(settings.value)
 }
 
-// 切换翻译引擎
 const toggleTranslationEngine = () => {
   settings.value = {
     ...settings.value,

@@ -1,10 +1,12 @@
 const fs = require('node:fs')
 const path = require('node:path')
+const https = require('https')
 const { googletrans } = require('googletrans')
+
+const EMPTY_DICT_RESULT = { phonetic: '', definitions: [], examples: [] }
 
 // 通过 window 对象向渲染进程注入 nodejs 能力
 window.services = {
-  // Google 翻译（Node.js 层调用 googletrans）
   googleTranslate (text, from, to) {
     return new Promise((resolve, reject) => {
       const options = { from, to }
@@ -23,26 +25,25 @@ window.services = {
         })
     })
   },
-  // 词典查询（Free Dictionary API）
   lookupWord (word) {
     return new Promise((resolve) => {
       if (!word || typeof word !== 'string' || !word.trim()) {
-        resolve({ phonetic: '', definitions: [], examples: [] })
+        resolve(EMPTY_DICT_RESULT)
         return
       }
 
       const encodedWord = encodeURIComponent(word.trim())
       const url = `https://api.dictionaryapi.dev/api/v2/entries/en/${encodedWord}`
 
-      const https = require('https')
       const req = https.get(url, { timeout: 5000 }, (res) => {
         let data = ''
         res.on('data', chunk => { data += chunk })
+        res.on('error', () => {})
         res.on('end', () => {
           try {
             const parsed = JSON.parse(data)
             if (!Array.isArray(parsed) || parsed.length === 0) {
-              resolve({ phonetic: '', definitions: [], examples: [] })
+              resolve(EMPTY_DICT_RESULT)
               return
             }
 
@@ -69,32 +70,29 @@ window.services = {
 
             resolve({ phonetic, definitions, examples })
           } catch {
-            resolve({ phonetic: '', definitions: [], examples: [] })
+            resolve(EMPTY_DICT_RESULT)
           }
         })
       })
 
       req.on('error', () => {
-        resolve({ phonetic: '', definitions: [], examples: [] })
+        resolve(EMPTY_DICT_RESULT)
       })
 
       req.on('timeout', () => {
         req.destroy()
-        resolve({ phonetic: '', definitions: [], examples: [] })
+        resolve(EMPTY_DICT_RESULT)
       })
     })
   },
-  // 读文件
   readFile (file) {
     return fs.readFileSync(file, { encoding: 'utf-8' })
   },
-  // 文本写入到下载目录
   writeTextFile (text) {
     const filePath = path.join(window.utools.getPath('downloads'), Date.now().toString() + '.txt')
     fs.writeFileSync(filePath, text, { encoding: 'utf-8' })
     return filePath
   },
-  // 图片写入到下载目录
   writeImageFile (base64Url) {
     const matchs = /^data:image\/([a-z]{1,20});base64,/i.exec(base64Url)
     if (!matchs) return
