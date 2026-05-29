@@ -2,10 +2,11 @@
   "version": "1.1.0",
   "type": "module",
   "scripts": {
-    "dev": "vite",
+    "dev": "vite --port 5175",
     "build": "vite build"
   },
   "dependencies": {
+    "googletrans": "^1.0.28",
     "vue": "^3.5.13",
     "vue-router": "^5.0.7"
   },
