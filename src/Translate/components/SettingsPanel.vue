@@ -64,6 +64,34 @@ const toggleSetting = (key) => {
           <!-- 内容 -->
           <div class="settings-content">
             <div class="settings-section">
+              <h3 class="section-title">翻译引擎</h3>
+              <div class="settings-list">
+                <div
+                  class="setting-item strategy-item"
+                  :class="{ active: localSettings.translationEngine === 'ai' }"
+                  @click="localSettings.translationEngine = 'ai'"
+                >
+                  <div class="setting-info">
+                    <span class="setting-name">AI 模型</span>
+                    <span class="setting-desc">结构化翻译，含音标、释义、例句</span>
+                  </div>
+                  <span class="strategy-check" v-if="localSettings.translationEngine === 'ai'">✓</span>
+                </div>
+                <div
+                  class="setting-item strategy-item"
+                  :class="{ active: localSettings.translationEngine === 'google' }"
+                  @click="localSettings.translationEngine = 'google'"
+                >
+                  <div class="setting-info">
+                    <span class="setting-name">Google 翻译</span>
+                    <span class="setting-desc">免费快速，词典补充音标释义</span>
+                  </div>
+                  <span class="strategy-check" v-if="localSettings.translationEngine === 'google'">✓</span>
+                </div>
+              </div>
+            </div>
+
+            <div class="settings-section">
               <h3 class="section-title">语言检测策略</h3>
               <div class="settings-list">
                 <div
