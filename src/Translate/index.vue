@@ -336,6 +336,15 @@ const toggleVariableNaming = () => {
   saveSettings(settings.value)
 }
 
+// 切换翻译引擎
+const toggleTranslationEngine = () => {
+  settings.value = {
+    ...settings.value,
+    translationEngine: settings.value.translationEngine === 'ai' ? 'google' : 'ai',
+  }
+  saveSettings(settings.value)
+}
+
 // 清空输入
 const handleClear = () => {
   inputText.value = ''
@@ -421,14 +430,24 @@ onMounted(() => {
     </div>
 
     <div class="translate-footer">
-      <button
-        class="var-naming-btn"
-        :class="{ active: settings.showVariableNaming }"
-        @click="toggleVariableNaming"
-        title="编程变量命名模式"
-      >
-        <span>&lt;/&gt;</span>
-      </button>
+      <div class="footer-left">
+        <button
+          class="engine-toggle-btn"
+          :class="{ active: settings.translationEngine === 'google' }"
+          @click="toggleTranslationEngine"
+          :title="settings.translationEngine === 'google' ? 'Google 翻译' : 'AI 翻译'"
+        >
+          <span>{{ settings.translationEngine === 'google' ? 'G' : 'AI' }}</span>
+        </button>
+        <button
+          class="var-naming-btn"
+          :class="{ active: settings.showVariableNaming }"
+          @click="toggleVariableNaming"
+          title="编程变量命名模式"
+        >
+          <span>&lt;/&gt;</span>
+        </button>
+      </div>
       <div class="footer-center">
         <KeyboardShortcuts />
       </div>
@@ -527,7 +546,7 @@ onMounted(() => {
   backdrop-filter: blur(10px);
   border-top: 1px solid rgba(226, 232, 240, 0.6);
   display: grid;
-  grid-template-columns: 32px 1fr 32px;
+  grid-template-columns: auto 1fr 32px;
   align-items: center;
   gap: 8px;
   position: relative;
@@ -572,6 +591,45 @@ onMounted(() => {
   box-shadow: 0 1px 3px rgba(99, 102, 241, 0.3);
 }
 
+.footer-left {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.engine-toggle-btn {
+  width: 32px;
+  height: 32px;
+  border: 1px solid rgba(226, 232, 240, 0.8);
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.9);
+  color: var(--text-secondary, #64748b);
+  cursor: pointer;
+  transition: all 0.2s;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-family: monospace;
+  font-size: 11px;
+  font-weight: 700;
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.03);
+}
+
+.engine-toggle-btn:hover {
+  background: white;
+  border-color: rgba(99, 102, 241, 0.4);
+  color: #6366f1;
+  transform: translateY(-1px);
+  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.04);
+}
+
+.engine-toggle-btn.active {
+  background: #6366f1;
+  border-color: #6366f1;
+  color: white;
+  box-shadow: 0 1px 3px rgba(99, 102, 241, 0.3);
+}
+
 @media (prefers-color-scheme: dark) {
   .translate-container {
     background: linear-gradient(135deg, #0f172a 0%, #1e293b 100%);
@@ -609,6 +667,26 @@ onMounted(() => {
   }
 
   .var-naming-btn.active {
+    background: #6366f1;
+    border-color: #6366f1;
+    color: white;
+  }
+
+  .engine-toggle-btn {
+    background: rgba(30, 41, 59, 0.9);
+    border-color: rgba(51, 65, 85, 0.8);
+    color: var(--text-secondary, #94a3b8);
+    box-shadow: 0 1px 2px rgba(0, 0, 0, 0.2);
+  }
+
+  .engine-toggle-btn:hover {
+    background: #1e293b;
+    border-color: rgba(99, 102, 241, 0.5);
+    color: #a5b4fc;
+    box-shadow: 0 2px 4px rgba(0, 0, 0, 0.25);
+  }
+
+  .engine-toggle-btn.active {
     background: #6366f1;
     border-color: #6366f1;
     color: white;
