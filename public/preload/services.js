@@ -23,6 +23,67 @@ window.services = {
         })
     })
   },
+  // 词典查询（Free Dictionary API）
+  lookupWord (word) {
+    return new Promise((resolve) => {
+      if (!word || typeof word !== 'string' || !word.trim()) {
+        resolve({ phonetic: '', definitions: [], examples: [] })
+        return
+      }
+
+      const encodedWord = encodeURIComponent(word.trim())
+      const url = `https://api.dictionaryapi.dev/api/v2/entries/en/${encodedWord}`
+
+      const https = require('https')
+      const req = https.get(url, { timeout: 5000 }, (res) => {
+        let data = ''
+        res.on('data', chunk => { data += chunk })
+        res.on('end', () => {
+          try {
+            const parsed = JSON.parse(data)
+            if (!Array.isArray(parsed) || parsed.length === 0) {
+              resolve({ phonetic: '', definitions: [], examples: [] })
+              return
+            }
+
+            const entry = parsed[0]
+            const phonetic = entry.phonetic || (entry.phonetics && entry.phonetics[0]?.text) || ''
+
+            const definitions = []
+            const examples = []
+
+            for (const meaning of entry.meanings || []) {
+              for (const def of meaning.definitions || []) {
+                if (definitions.length < 3) {
+                  definitions.push({
+                    pos: meaning.partOfSpeech || '',
+                    meaning: def.definition || '',
+                    example: def.example || '',
+                  })
+                }
+                if (examples.length < 2 && def.example) {
+                  examples.push(def.example)
+                }
+              }
+            }
+
+            resolve({ phonetic, definitions, examples })
+          } catch {
+            resolve({ phonetic: '', definitions: [], examples: [] })
+          }
+        })
+      })
+
+      req.on('error', () => {
+        resolve({ phonetic: '', definitions: [], examples: [] })
+      })
+
+      req.on('timeout', () => {
+        req.destroy()
+        resolve({ phonetic: '', definitions: [], examples: [] })
+      })
+    })
+  },
   // 读文件
   readFile (file) {
     return fs.readFileSync(file, { encoding: 'utf-8' })
