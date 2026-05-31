@@ -1,5 +1,5 @@
 <script lang="ts" setup>
-import { ref, watch, nextTick, onMounted } from 'vue'
+import { ref, watch, nextTick, onMounted, computed } from 'vue'
 import { useRouter } from 'vue-router'
 import InputArea from './components/InputArea.vue'
 import ResultDisplay from './components/ResultDisplay.vue'
@@ -318,6 +318,10 @@ const toggleTranslationEngine = () => {
     settings.translationEngine === 'ai' ? 'google' : 'ai')
 }
 
+const engineLabel = computed(() =>
+  settings.translationEngine === 'google' ? 'Google 引擎翻译模式' : 'AI 大模型翻译引擎模式'
+)
+
 // 打开 GitHub 仓库
 const openGitHub = () => {
   window.utools.shellOpenExternal('https://github.com/puppetdevz/dev-translation')
@@ -408,15 +412,15 @@ watch(() => props.enterAction, (action) => {
           class="engine-toggle-btn"
           :class="{ active: settings.translationEngine === 'google' }"
           @click="toggleTranslationEngine"
-          :title="settings.translationEngine === 'google' ? 'Google 翻译' : 'AI 翻译'"
+          :aria-label="engineLabel"
         >
-          <span>{{ settings.translationEngine === 'google' ? 'G' : 'AI' }}</span>
+          <span>{{ settings.translationEngine === 'google' ? 'Google' : 'AI' }}</span>
         </button>
         <button
           class="var-naming-btn"
           :class="{ active: settings.showVariableNaming }"
           @click="toggleVariableNaming"
-          title="编程变量命名模式"
+          aria-label="编程变量模式"
         >
           <span>&lt;/&gt;</span>
         </button>
@@ -539,6 +543,7 @@ watch(() => props.enterAction, (action) => {
 }
 
 .var-naming-btn {
+  position: relative;
   width: 32px;
   height: 32px;
   border: 1px solid rgba(226, 232, 240, 0.8);
@@ -571,6 +576,60 @@ watch(() => props.enterAction, (action) => {
   box-shadow: 0 1px 3px rgba(99, 102, 241, 0.3);
 }
 
+.var-naming-btn::after,
+.engine-toggle-btn::after {
+  content: attr(aria-label);
+  position: absolute;
+  bottom: calc(100% + 8px);
+  left: 0;
+  transform: translateY(4px);
+  z-index: 20;
+  padding: 6px 8px;
+  border-radius: 6px;
+  background: rgba(15, 23, 42, 0.92);
+  color: white;
+  font-size: 12px;
+  font-weight: 600;
+  line-height: 1;
+  white-space: nowrap;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.16s ease, transform 0.16s ease;
+  box-shadow: 0 4px 12px rgba(15, 23, 42, 0.18);
+}
+
+.var-naming-btn::before,
+.engine-toggle-btn::before {
+  content: '';
+  position: absolute;
+  bottom: calc(100% + 3px);
+  left: 12px;
+  transform: translateY(4px) rotate(45deg);
+  z-index: 19;
+  width: 8px;
+  height: 8px;
+  background: rgba(15, 23, 42, 0.92);
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.16s ease, transform 0.16s ease;
+}
+
+.var-naming-btn:hover::after,
+.var-naming-btn:focus-visible::after,
+.engine-toggle-btn:hover::after,
+.engine-toggle-btn:focus-visible::after {
+  opacity: 1;
+  transform: translateY(0);
+}
+
+.var-naming-btn:hover::before,
+.var-naming-btn:focus-visible::before,
+.engine-toggle-btn:hover::before,
+.engine-toggle-btn:focus-visible::before {
+  opacity: 1;
+  transform: translateY(0) rotate(45deg);
+}
+
 .footer-left {
   display: flex;
   align-items: center;
@@ -578,8 +637,10 @@ watch(() => props.enterAction, (action) => {
 }
 
 .engine-toggle-btn {
-  width: 32px;
+  position: relative;
+  min-width: 62px;
   height: 32px;
+  padding: 0 10px;
   border: 1px solid rgba(226, 232, 240, 0.8);
   border-radius: 8px;
   background: rgba(255, 255, 255, 0.9);
@@ -589,8 +650,7 @@ watch(() => props.enterAction, (action) => {
   display: flex;
   align-items: center;
   justify-content: center;
-  font-family: monospace;
-  font-size: 11px;
+  font-size: 12px;
   font-weight: 700;
   box-shadow: 0 1px 2px rgba(0, 0, 0, 0.03);
 }
