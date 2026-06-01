@@ -1,5 +1,28 @@
 # Changelog
 
+## [1.2.0] - 2026-06-01
+
+### 新增
+
+- Google 翻译引擎：双引擎架构（AI 模型 + Google 翻译），底部按钮一键切换
+- 路由系统：Vue Router 支持 translate 和 settings 页面独立路由
+- 全屏设置页面：按引擎分组管理输出设置，实时生效自动持久化
+- useSettings 组合式函数：跨组件共享设置状态，统一管理
+- 底部工具栏增强：翻译引擎切换按钮 (AI/G)、自定义 CSS tooltip 提示
+- 剪贴板工具函数：统一 copyText 封装
+- preload 服务扩展：googleTranslate 翻译方法、lookupWord 词典查询
+
+### 改进
+
+- 底部 Footer 添加 GitHub Star 链接，方便用户反馈
+- 移除废弃的 SettingsPanel 和 KeyboardShortcuts 组件
+- 文档重组：README.md、CHANGELOG.md 移至根目录，截图移至 assets/
+- 代码清理：移除冗余注释、提取共享常量、优化设置初始化
+
+### 修复
+
+- 修复开发服务器端口为 5175，避免端口冲突
+
 ## [1.1.0] - 2026-02-25
 
 ### 新增
