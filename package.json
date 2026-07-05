@@ -6,7 +6,7 @@
     "build": "vite build"
   },
   "dependencies": {
-    "googletrans": "^1.0.28",
+    "google-translate-api-x": "^10.7.3",
     "vue": "^3.5.13",
     "vue-router": "^5.0.7"
   },

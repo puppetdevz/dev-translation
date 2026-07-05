@@ -13,7 +13,12 @@ const DEFAULT_SETTINGS = {
   showVariableNaming: true,     // 显示变量命名样式
   showContextNote: true,        // 显示上下文说明
   detectionStrategy: 'regex',   // 语言检测策略: 'regex' | 'ai'
-  translationEngine: 'ai',     // 翻译引擎: 'ai' | 'google'
+  translationEngine: 'ai',     // 主翻译引擎（兼容旧版本，实际主引擎由 failoverOrder[0] 决定）
+  failoverOrder: ['ai', 'google', 'deepl'], // 自动故障转移顺序: 所有引擎的有序列表，首位为主引擎，翻译失败时按此顺序依次重试
+  deeplApiKey: '',              // DeepL API Key（Free 版以 :fx 结尾，注册地址 https://www.deepl.com/pro-api）
+  deeplMode: 'official',        // DeepL 接入方式: 'official'（官方 API） | 'deeplx'（自部署/公共实例）
+  deeplxServerUrl: '',          // DeepLX 服务器地址（如 http://localhost:1188）
+  deeplxToken: '',              // DeepLX 访问令牌（可选，自部署无 token 时留空）
 }
 
 /**
@@ -25,7 +30,13 @@ export const loadSettings = () => {
     const stored = window.utools.dbStorage.getItem(STORAGE_KEY)
     if (stored) {
       // 合并默认设置，确保新增字段有默认值
-      return { ...DEFAULT_SETTINGS, ...JSON.parse(stored) }
+      const merged = { ...DEFAULT_SETTINGS, ...JSON.parse(stored) }
+      // 兼容旧版本：若没有 failoverOrder，则用原主引擎 + 其他引擎初始化（主引擎首位）
+      if (!merged.failoverOrder || !Array.isArray(merged.failoverOrder) || merged.failoverOrder.length === 0) {
+        const main = merged.translationEngine || 'ai'
+        merged.failoverOrder = [main, ...['ai', 'google', 'deepl'].filter(e => e !== main)]
+      }
+      return merged
     }
   } catch (error) {
     console.error('加载设置失败:', error)
