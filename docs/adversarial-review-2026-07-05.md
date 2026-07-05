@@ -2,6 +2,7 @@
 
 > 审查范围：`origin/main...HEAD` + 工作树未提交改动
 > 审查日期：2026-07-05
+> 修复日期：2026-07-05（15 条 findings 已全部修复，详见各条「修复」段）
 > 核心文件：`public/preload/services.js`、`src/Translate/index.vue`、`src/Translate/components/SettingsPage.vue`、`src/Translate/utils/storage.js`、`src/Translate/utils/useSettings.js`
 
 ## 审查方法
@@ -384,3 +385,48 @@ detectInputType 仅 translate 时真正消费，watch 中提前计算属浪费�
 8. **`services.js:93`** — withTimeout 传入 AbortSignal 或接受取消能力
 9. **`services.js:348`** — 缓存层共享 pending Promise（inflight 去重）
 10. 其余 MEDIUM/LOW 项按优先级排队修复
+
+---
+
+## 修复总结（2026-07-05）
+
+15 条 findings 全部修复完成，构建通过（`pnpm build` 无错误）。修复明细：
+
+| # | 严重度 | 文件 | 修复方案 | 状态 |
+|---|--------|------|----------|------|
+| 1 | 🔴 | `index.vue` | 引入模块级 `translateRequestId`，每次 translate 自增；结果回填/loading 解除前校验令牌，丢弃陈旧请求结果；handleClear/onUnmounted 自增令牌使 inflight 失效 | ✅ |
+| 2 | 🔴 | `index.vue` | 引入 `detectionVersion`，AI 检测回调回填前校验版本号，丢弃旧慢请求结果 | ✅ |
+| 3 | 🔴 | `index.vue` | watch 清空分支调用 `cancelDetection()`（含 `clearTimeout(detectionTimer)` + 版本号自增） | ✅ |
+| 4 | 🔴 | `index.vue` | 新增 `lookupWordIfSingle` 辅助：仅当译文为单个英文单词才查词典，多词短语返回空字典结果；Google/DeepL 的 zh→en 分支均接入 | ✅ |
+| 5 | 🟠 | `index.vue` | `FOOTER_ENGINE_CYCLE = ['ai','thirdparty-ai','google','deepl']` 补全 4 引擎；新增 `mainEngineShortLabel` 同步 footer 文案与 `engineLabel` tooltip | ✅ |
+| 6 | 🟠 | `storage.js` / `SettingsPage.vue` | `KNOWN_ENGINES` 白名单导出，`loadSettings` 过滤未知引擎；模板 `<template v-for>` 包裹 + `v-if="engineMeta[engine]"` 双保险 | ✅ |
+| 7 | 🟠 | `index.vue` | `parseResult` 重构：三重回退失败后，对非空纯文本降级返回 `{translation: cleaned}`；旧格式缺 examples 时补默认空数组而非丢弃 | ✅ |
+| 8 | 🟠 | `index.vue` | `translateWithThirdpartyAI` 解析前先检查 `data.error`，抛出含真实 message 的错误 | ✅ |
+| 9 | 🟡 | `services.js` | `postJson` 与 `httpsGetJson` 在 `res.on('end')` 加 `statusCode >= 400` 检查，抛含状态码与 body 片段的错误；解析失败时附带 body 前 120 字符 | ✅ |
+| 10 | 🟡 | `services.js` | `withTimeout` 增加可选 `abortFn`；`sourceLibrary` 用 `AbortController` 注入库 `requestOptions.signal`，超时真正取消底层 fetch | ✅ |
+| 11 | 🟡 | `services.js` | 新增 `inflightRequests` Map，`googleTranslate` 共享 pending Promise，并发同 key 复用单次请求 | ✅ |
+| 12 | 🟡 | `index.vue` | `runDetection` 的 AI 回调用 try/catch 包裹，失败仅 console.warn 不再 unhandled rejection；`result.content` 取值做空值保护 | ✅ |
+| 13 | 🟡 | `index.vue` | `handleAcceptPolish` 重置 `isManualOverride=false` 并 `cancelDetection()`，让新文本走自动检测 | ✅ |
+| 14 | 🟡 | `storage.js` | `loadSettings` 用 `typeof stored === 'string' && stored` 校验，避免空串/非字符串被误判或 JSON.parse 抛错静默丢配置 | ✅ |
+| 15 | 🔵 | `index.vue` | `watch(inputText)` 不再提前调用 `detectInputType`，仅在 translate 时由 `translateWithX` 内部统一设置 | ✅ |
+
+### 修复验证
+
+- ✅ `pnpm build` 通过，无构建错误（44 模块转译成功）
+- ✅ 12 个修复点静态检查全部落地（grep 计数核对）
+- ✅ `DEFAULT_SETTINGS.failoverOrder` 与 `KNOWN_ENGINES` 一致性核对
+- ✅ `detectInputType` 调用点收紧到 translate 流程内，不再在 watch 中提前计算
+
+### 待人工验证（uTools 环境内）
+
+以下场景需在 uTools 插件实机中复测：
+
+1. 翻译并发竞态：主引擎慢响应下连续翻译，确认结果为最新文本
+2. AI 检测竞态：连续快速输入，确认语言徽章与实际一致
+3. 输入清空：AI 策略下输入后快速清空，确认徽章消失
+4. 中译英单词：输入 '开发' 确认译文正确（词典查询对多词译文优雅降级）
+5. Footer 引擎切换：循环覆盖 4 引擎（含第三方 AI）
+6. 未知引擎值：手动改 dbStorage 注入未知值，确认设置页不白屏
+7. 第三方 AI 错误：填错 key 翻译，确认错误信息含真实原因
+8. DeepL 错误：填错 key 翻译，确认错误信息含 HTTP 状态码
+9. 双击翻译：缓存 miss 下双击，确认仅一次实际请求

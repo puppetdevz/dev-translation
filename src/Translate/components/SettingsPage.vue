@@ -15,10 +15,11 @@ const handleStrategySelect = (strategy) => {
 }
 
 const engineMeta = {
-  ai: { icon: '🤖', name: 'AI 大模型' },
-  'thirdparty-ai': { icon: '🔌', name: '第三方 AI' },
-  google: { icon: '🌐', name: '谷歌' },
-  deepl: { icon: '🎯', name: 'DeepL' },
+  ai: { icon: '⚡', name: 'uTools AI' },
+  'thirdparty-ai': { icon: '🧠', name: '自定义 AI' },
+  google: { brand: 'G', brandClass: 'brand-google', name: 'Google 翻译' },
+  deepl: { brand: 'D', brandClass: 'brand-deepl', name: 'DeepL 官方' },
+  deeplx: { brand: 'X', brandClass: 'brand-deeplx', name: 'DeepLX 自部署' },
 }
 
 const mainEngine = computed(() => (settings.failoverOrder && settings.failoverOrder[0]) || 'ai')
@@ -124,31 +125,31 @@ const deeplOutputs = [
         <div class="engine-layout">
           <!-- 左列：引擎列表（拖拽调序 + 点击选中） -->
           <div class="engine-list">
-            <div
-              v-for="(engine, index) in settings.failoverOrder"
-              :key="engine"
-              class="engine-card"
-              :class="{
-                active: selectedEngine === engine,
-                dragging: dragIndex === index,
-                'drag-over': dragOverIndex === index && dragIndex !== index,
-                'is-primary': index === 0
-              }"
-              draggable="true"
-              @dragstart="onDragStart(index)"
-              @dragover.prevent="onDragOver(index)"
-              @drop="onDrop(index)"
-              @dragend="onDragEnd"
-              @click="selectEngine(engine)"
-            >
-              <span class="engine-drag-handle">⠿</span>
-              <span class="engine-card-icon">{{ engineMeta[engine].icon }}</span>
-              <div class="engine-card-info">
-                <span class="engine-card-name">{{ engineMeta[engine].name }}</span>
-                <span class="engine-card-tag" v-if="index === 0">主引擎</span>
+            <template v-for="(engine, index) in settings.failoverOrder" :key="engine">
+              <div
+                v-if="engineMeta[engine]"
+                class="engine-card"
+                :class="{
+                  active: selectedEngine === engine,
+                  dragging: dragIndex === index,
+                  'drag-over': dragOverIndex === index && dragIndex !== index
+                }"
+                draggable="true"
+                @dragstart="onDragStart(index)"
+                @dragover.prevent="onDragOver(index)"
+                @drop="onDrop(index)"
+                @dragend="onDragEnd"
+                @click="selectEngine(engine)"
+              >
+                <span class="engine-drag-handle">⠿</span>
+                <span v-if="engineMeta[engine].icon" class="engine-card-icon">{{ engineMeta[engine].icon }}</span>
+                <span v-else class="brand-badge" :class="engineMeta[engine].brandClass">{{ engineMeta[engine].brand }}</span>
+                <div class="engine-card-info">
+                  <span class="engine-card-name">{{ engineMeta[engine].name }}</span>
+                </div>
+                <span class="engine-priority">P{{ index + 1 }}</span>
               </div>
-              <span class="engine-card-check" v-if="selectedEngine === engine">✓</span>
-            </div>
+            </template>
           </div>
 
           <!-- 右列：选中引擎的具体配置 + 输出设置 -->
@@ -158,22 +159,18 @@ const deeplOutputs = [
                 <!-- 选中引擎的配置 -->
                 <template v-if="selectedEngine === 'deepl'">
                   <div class="deepl-config" style="margin-top: 0;">
-                    <div class="deepl-mode-tabs">
-                      <button class="deepl-mode-tab" :class="{ active: settings.deeplMode !== 'deeplx' }" @click="updateSetting('deeplMode', 'official')">官方 API</button>
-                      <button class="deepl-mode-tab" :class="{ active: settings.deeplMode === 'deeplx' }" @click="updateSetting('deeplMode', 'deeplx')">DeepLX</button>
-                    </div>
-                    <div v-if="settings.deeplMode !== 'deeplx'">
-                      <label class="deepl-config-label">DeepL API Key</label>
-                      <input class="deepl-api-input" type="password" :value="settings.deeplApiKey" @input="updateSetting('deeplApiKey', $event.target.value)" placeholder="粘贴你的 DeepL API Key（Free 版以 :fx 结尾）" />
-                      <p class="deepl-config-hint">免费注册获取 API Key（50 万字符/月，无需信用卡）：<a class="deepl-link" @click="openDeeplSignup">前往 DeepL 注册</a></p>
-                    </div>
-                    <div v-else>
-                      <label class="deepl-config-label">服务器地址</label>
-                      <input class="deepl-api-input" type="text" :value="settings.deeplxServerUrl" @input="updateSetting('deeplxServerUrl', $event.target.value)" placeholder="http://localhost:1188 或 https://api.deeplxxx.org" />
-                      <label class="deepl-config-label" style="margin-top: 10px;">访问令牌（可选）</label>
-                      <input class="deepl-api-input" type="password" :value="settings.deeplxToken" @input="updateSetting('deeplxToken', $event.target.value)" placeholder="填写后将自动拼接为 地址/令牌/translate" />
-                      <p class="deepl-config-hint">支持直接填写完整 URL（含令牌），或分别填写地址和令牌自动拼接。自部署 DeepLX：<a class="deepl-link" @click="openDeeplxGuide">部署指南</a></p>
-                    </div>
+                    <label class="deepl-config-label">DeepL API Key</label>
+                    <input class="deepl-api-input" type="password" :value="settings.deeplApiKey" @input="updateSetting('deeplApiKey', $event.target.value)" placeholder="粘贴你的 DeepL API Key（Free 版以 :fx 结尾）" />
+                    <p class="deepl-config-hint">免费注册获取 API Key（50 万字符/月，无需信用卡）：<a class="deepl-link" @click="openDeeplSignup">前往 DeepL 注册</a></p>
+                  </div>
+                </template>
+                <template v-else-if="selectedEngine === 'deeplx'">
+                  <div class="deepl-config" style="margin-top: 0;">
+                    <label class="deepl-config-label">服务器地址</label>
+                    <input class="deepl-api-input" type="text" :value="settings.deeplxServerUrl" @input="updateSetting('deeplxServerUrl', $event.target.value)" placeholder="http://localhost:1188 或 https://api.deeplxxx.org" />
+                    <label class="deepl-config-label" style="margin-top: 10px;">访问令牌（可选）</label>
+                    <input class="deepl-api-input" type="password" :value="settings.deeplxToken" @input="updateSetting('deeplxToken', $event.target.value)" placeholder="填写后将自动拼接为 地址/令牌/translate" />
+                    <p class="deepl-config-hint">支持直接填写完整 URL（含令牌），或分别填写地址和令牌自动拼接。自部署 DeepLX：<a class="deepl-link" @click="openDeeplxGuide">部署指南</a></p>
                   </div>
                 </template>
                 <template v-else-if="selectedEngine === 'thirdparty-ai'">
@@ -191,7 +188,8 @@ const deeplOutputs = [
                 </template>
                 <template v-else>
                   <div class="engine-no-config">
-                    <span class="engine-no-config-icon">{{ engineMeta[selectedEngine].icon }}</span>
+                    <span v-if="engineMeta[selectedEngine].icon" class="engine-no-config-icon">{{ engineMeta[selectedEngine].icon }}</span>
+                    <span v-else class="brand-badge" :class="engineMeta[selectedEngine].brandClass">{{ engineMeta[selectedEngine].brand }}</span>
                     <span>{{ engineMeta[selectedEngine].name }} 无需额外配置</span>
                   </div>
                 </template>
@@ -201,7 +199,7 @@ const deeplOutputs = [
                 <!-- 输出设置：基于主引擎（failoverOrder[0]），不随选中引擎变化 -->
                 <div class="outputs-list">
                   <div
-                    v-for="item in (mainEngine === 'ai' || mainEngine === 'thirdparty-ai') ? aiOutputs : mainEngine === 'deepl' ? deeplOutputs : googleOutputs"
+                    v-for="item in (mainEngine === 'ai' || mainEngine === 'thirdparty-ai') ? aiOutputs : (mainEngine === 'deepl' || mainEngine === 'deeplx') ? deeplOutputs : googleOutputs"
                     :key="item.key"
                     class="output-item"
                   >
@@ -395,11 +393,6 @@ const deeplOutputs = [
   border-top: 2px solid #6366f1;
 }
 
-.engine-card.is-primary {
-  background: rgba(99, 102, 241, 0.06);
-  border-left: 3px solid #6366f1;
-}
-
 .engine-drag-handle {
   font-size: 16px;
   color: var(--text-secondary, #94a3b8);
@@ -418,6 +411,27 @@ const deeplOutputs = [
   flex-shrink: 0;
 }
 
+/* 品牌色圆牌字母：用于 Google/DeepL/DeepLX（emoji 无官方图标的品牌） */
+.brand-badge {
+  width: 22px;
+  height: 22px;
+  border-radius: 50%;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 12px;
+  font-weight: 700;
+  color: #ffffff;
+  flex-shrink: 0;
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+  letter-spacing: -0.5px;
+  user-select: none;
+}
+
+.brand-google { background: #4285F4; }
+.brand-deepl { background: #0F2B46; }
+.brand-deeplx { background: #f97316; }
+
 .engine-card-info {
   flex: 1;
   display: flex;
@@ -432,21 +446,19 @@ const deeplOutputs = [
   color: var(--text-primary, #1e293b);
 }
 
-.engine-card-tag {
+/* 故障转移优先级徽章：P1=主引擎，与 P2+ 样式一致 */
+.engine-priority {
   font-size: 11px;
-  font-weight: 600;
-  color: #6366f1;
-  background: rgba(99, 102, 241, 0.1);
-  padding: 2px 6px;
-  border-radius: 4px;
-  flex-shrink: 0;
-}
-
-.engine-card-check {
-  color: #6366f1;
   font-weight: 700;
-  font-size: 14px;
+  letter-spacing: 0.3px;
+  color: var(--text-secondary, #64748b);
+  background: rgba(226, 232, 240, 0.6);
+  border: 1px solid rgba(203, 213, 224, 0.8);
+  padding: 2px 7px;
+  border-radius: 6px;
   flex-shrink: 0;
+  line-height: 1.4;
+  font-variant-numeric: tabular-nums;
 }
 
 .section-hint {
@@ -492,35 +504,6 @@ const deeplOutputs = [
   background: rgba(99, 102, 241, 0.04);
   border: 1px solid rgba(99, 102, 241, 0.15);
   border-radius: 10px;
-}
-
-.deepl-mode-tabs {
-  display: grid;
-  grid-template-columns: 1fr 1fr;
-  gap: 6px;
-  margin-bottom: 12px;
-}
-
-.deepl-mode-tab {
-  padding: 8px 12px;
-  background: rgba(248, 250, 252, 0.8);
-  border: 1px solid transparent;
-  border-radius: 8px;
-  cursor: pointer;
-  transition: all 0.2s;
-  font-size: 13px;
-  font-weight: 600;
-  color: var(--text-secondary, #64748b);
-}
-
-.deepl-mode-tab:hover {
-  background: rgba(241, 245, 249, 1);
-}
-
-.deepl-mode-tab.active {
-  background: rgba(99, 102, 241, 0.08);
-  border-color: rgba(99, 102, 241, 0.3);
-  color: #6366f1;
 }
 
 .deepl-config-label {
@@ -776,15 +759,6 @@ const deeplOutputs = [
     color: var(--text-secondary, #64748b);
   }
 
-  .deepl-mode-tab {
-    background: rgba(30, 41, 59, 0.6);
-    color: var(--text-secondary, #94a3b8);
-  }
-
-  .deepl-mode-tab:hover {
-    background: rgba(51, 65, 85, 0.8);
-  }
-
   .settings-body::-webkit-scrollbar-thumb {
     background: rgba(255, 255, 255, 0.2);
   }
@@ -803,8 +777,10 @@ const deeplOutputs = [
     border-color: rgba(99, 102, 241, 0.4);
   }
 
-  .engine-card.is-primary {
-    background: rgba(99, 102, 241, 0.12);
+  .engine-priority {
+    color: var(--text-secondary, #94a3b8);
+    background: rgba(51, 65, 85, 0.6);
+    border-color: rgba(71, 85, 105, 0.8);
   }
 
   .engine-card-name {
@@ -835,10 +811,6 @@ const deeplOutputs = [
     font-size: 13px;
   }
 
-  .engine-card-tag {
-    display: none;
-  }
-
   .engine-layout {
     flex-direction: column;
   }
@@ -860,10 +832,6 @@ const deeplOutputs = [
   .engine-card-info {
     flex-direction: column;
     gap: 2px;
-  }
-
-  .engine-card-check {
-    display: none;
   }
 
   .engine-card-name {

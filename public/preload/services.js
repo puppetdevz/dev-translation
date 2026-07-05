@@ -10,6 +10,8 @@ const EMPTY_DICT_RESULT = { phonetic: '', definitions: [], examples: [] }
 const CACHE_MAX = 200
 const CACHE_TTL = 24 * 60 * 60 * 1000 // 24 小时
 const translateCache = new Map() // key: from|to|text -> { value, expireAt }
+// inflight 去重：key -> Promise，并发同 key 共享单次请求，避免双 miss 击穿缓存与限流
+const inflightRequests = new Map()
 
 function getCache (key) {
   if (!translateCache.has(key)) return null
@@ -65,6 +67,11 @@ function httpsGetJson (url, extraHeaders) {
         if (settled) return
         settled = true
         clearTimeout(timer)
+        // HTTP 错误状态码：构造含状态码与响应片段的错误，便于上层诊断真实原因（4xx/5xx）
+        if (res.statusCode && res.statusCode >= 400) {
+          reject(new Error(`HTTP ${res.statusCode}: ${data.slice(0, 200)}`))
+          return
+        }
         try {
           resolve(JSON.parse(data))
         } catch (err) {
@@ -90,13 +97,24 @@ function httpsGetJson (url, extraHeaders) {
 }
 
 // 带超时的 Promise 包装（用于库调用）
-function withTimeout (promise, ms) {
+// 支持可选的 abort 函数：超时后调用以取消底层请求，避免 socket 泄漏与堆积限流
+function withTimeout (promise, ms, abortFn) {
   return new Promise((resolve, reject) => {
-    const timer = setTimeout(() => reject(new Error('请求超时')), ms)
+    let timedOut = false
+    const timer = setTimeout(() => {
+      timedOut = true
+      if (typeof abortFn === 'function') {
+        try { abortFn() } catch (e) { /* 忽略 abort 异常 */ }
+      }
+      reject(new Error('请求超时'))
+    }, ms)
     promise.then(
       (val) => { clearTimeout(timer); resolve(val) },
       (err) => { clearTimeout(timer); reject(err) }
-    )
+    ).finally(() => {
+      // promise 已 settle 后无需再 abort，但若已超时 abort 已执行过，重复调用无副作用
+    })
+    // 防止未消费的 timer 在 promise reject 后仍持有引用
   })
 }
 
@@ -143,10 +161,15 @@ function postJson (url, body, extraHeaders, timeoutMs = TIMEOUT_MS) {
         if (settled) return
         settled = true
         clearTimeout(timer)
+        // HTTP 错误状态码：构造含状态码与响应片段的错误，便于上层诊断（如 DeepL 403 key 无效、429 限流）
+        if (res.statusCode && res.statusCode >= 400) {
+          reject(new Error(`HTTP ${res.statusCode}: ${data.slice(0, 200)}`))
+          return
+        }
         try {
           resolve(JSON.parse(data))
         } catch (err) {
-          reject(new Error('响应解析失败: ' + err.message))
+          reject(new Error('响应解析失败: ' + err.message + (data ? ' (body: ' + data.slice(0, 120) + ')' : '')))
         }
       })
     })
@@ -172,14 +195,21 @@ function postJson (url, body, extraHeaders, timeoutMs = TIMEOUT_MS) {
 
 // ===== 翻译源 1：google-translate-api-x 库（内部 batch + single 双端点回退） =====
 async function sourceLibrary (text, from, to) {
-  const res = await withTimeout(
-    translate(text, { from, to, forceBatch: true, fallbackBatch: true }),
-    TIMEOUT_MS
-  )
-  if (!res || !res.text) {
+  // 用 AbortController 接入库的 requestOptions.signal，超时后真正取消底层 fetch，
+  // 避免 socket 在事件循环中堆积造成 fd 泄漏与持续触发 Google 端 429 限流
+  const controller = new AbortController()
+  const translatePromise = translate(text, {
+    from,
+    to,
+    forceBatch: true,
+    fallbackBatch: true,
+    requestOptions: { signal: controller.signal }
+  })
+  const result = await withTimeout(translatePromise, TIMEOUT_MS, () => controller.abort())
+  if (!result || !result.text) {
     throw new Error('库返回空结果')
   }
-  return res.text
+  return result.text
 }
 
 // ===== 翻译源 2：translate.googleapis.com gtx 端点（dj=1，JSON 对象格式） =====
@@ -352,10 +382,19 @@ window.services = {
     if (cached !== null) {
       return Promise.resolve(cached)
     }
-    return translateWithSources(text, from, to).then(result => {
+    // inflight 去重：若已有相同 key 的请求在飞，复用其 Promise，避免并发双 miss 击穿缓存
+    const existing = inflightRequests.get(cacheKey)
+    if (existing) {
+      return existing
+    }
+    const p = translateWithSources(text, from, to).then(result => {
       setCache(cacheKey, result)
       return result
+    }).finally(() => {
+      inflightRequests.delete(cacheKey)
     })
+    inflightRequests.set(cacheKey, p)
+    return p
   },
   deeplTranslate (text, from, to, apiKey) {
     return translateWithDeepL(text, from, to, apiKey)

@@ -1,5 +1,5 @@
 <script lang="ts" setup>
-import { ref, watch, nextTick, onMounted, computed } from 'vue'
+import { ref, watch, nextTick, onMounted, onUnmounted, computed } from 'vue'
 import { useRouter } from 'vue-router'
 import InputArea from './components/InputArea.vue'
 import ResultDisplay from './components/ResultDisplay.vue'
@@ -33,6 +33,8 @@ const error = ref('')
 // 降级提示状态
 const fallbackNotice = ref('')
 let fallbackTimer = null
+// 翻译请求令牌：每次翻译自增，结果回填前校验是否仍是最新请求，丢弃旧慢请求的覆盖
+let translateRequestId = 0
 
 // 润色相关状态
 const isPolishing = ref(false)
@@ -52,22 +54,42 @@ const detectLanguageByAI = async (text) => {
   const result = await window.utools.ai({
     messages: [{ role: 'user', content: `只回复 "zh" 或 "en"，检测以下文本的语言：\n${text.slice(0, 300)}` }]
   })
-  const content = result.content.trim().toLowerCase()
+  const content = (result && result.content && result.content.trim().toLowerCase()) || ''
   return content.includes('zh') ? 'zh' : 'en'
 }
 
 // 统一检测入口（AI 策略含 500ms 防抖）
 let detectionTimer = null
+// 检测版本号：每次发起检测自增，回调回填时校验版本是否最新，避免旧慢请求覆盖新结果
+let detectionVersion = 0
 const runDetection = (text) => {
   if (!text || !text.trim()) return
   if (settings.detectionStrategy === 'ai') {
     clearTimeout(detectionTimer)
+    const myVersion = ++detectionVersion
     detectionTimer = setTimeout(async () => {
-      detectedLanguage.value = await detectLanguageByAI(text)
+      try {
+        const lang = await detectLanguageByAI(text)
+        // 仅当本次仍是最新检测时回填，否则丢弃（防止旧慢请求覆盖新结果）
+        if (myVersion === detectionVersion) {
+          detectedLanguage.value = lang
+        }
+      } catch (err) {
+        console.warn('AI 语言检测失败:', err && err.message)
+      }
     }, 500)
   } else {
     detectedLanguage.value = detectLanguage(text)
   }
+}
+
+// 取消挂起的检测定时器与 inflight AI 检测（版本号失效后回调自动丢弃）
+const cancelDetection = () => {
+  if (detectionTimer) {
+    clearTimeout(detectionTimer)
+    detectionTimer = null
+  }
+  detectionVersion++ // 让任何 inflight AI 检测回调失效
 }
 
 // 手动切换语言方向
@@ -79,6 +101,7 @@ const handleLanguageToggle = () => {
 // 右键重新自动识别
 const handleLanguageRedetect = () => {
   isManualOverride.value = false
+  cancelDetection()
   runDetection(inputText.value)
 }
 
@@ -112,60 +135,74 @@ const detectInputType = (text) => {
 
 // 解析 AI 响应
 const parseResult = (aiResponse, type) => {
-  try {
-    // 尝试直接解析JSON
-    const result = JSON.parse(aiResponse)
-
-    // 句子模式只需验证 translation 字段
-    if (type === 'sentence') {
-      if (!result.translation) {
-        throw new Error('Invalid result structure')
-      }
-      return result
+  // 内部辅助：从字符串中尝试多种方式提取 JSON 对象
+  const tryExtractJson = (raw) => {
+    // 直接解析
+    try {
+      return JSON.parse(raw)
+    } catch (e) {
+      // 继续尝试其他方式
     }
-
-    // 单词/词组模式验证必需字段
-    if (!result.translation) {
-      throw new Error('Invalid result structure')
-    }
-
-    // 兼容旧格式和新格式
-    // 新格式: definitions 是对象数组 [{pos, meaning, example, exampleTranslation}]
-    // 旧格式: definitions 是字符串数组，examples 是字符串数组
-    if (result.definitions && result.definitions.length > 0) {
-      if (typeof result.definitions[0] === 'string') {
-        // 旧格式，保持原样
-        if (!Array.isArray(result.examples)) {
-          throw new Error('Invalid result structure')
-        }
-      }
-      // 新格式无需额外验证
-    }
-
-    return result
-  } catch (parseError) {
-    // 尝试提取JSON代码块
-    const jsonMatch = aiResponse.match(/```json\s*([\s\S]*?)\s*```/)
+    // 提取 ```json 代码块
+    const jsonMatch = raw.match(/```json\s*([\s\S]*?)\s*```/)
     if (jsonMatch) {
       try {
         return JSON.parse(jsonMatch[1])
       } catch (e) {
-        // 继续尝试其他方法
+        // 继续尝试其他方式
       }
     }
-
-    // 尝试提取花括号内容
-    const braceMatch = aiResponse.match(/\{[\s\S]*\}/)
+    // 提取花括号内容
+    const braceMatch = raw.match(/\{[\s\S]*\}/)
     if (braceMatch) {
       try {
         return JSON.parse(braceMatch[0])
       } catch (e) {
-        // 继续尝试其他方法
+        // 继续尝试其他方式
       }
     }
-
-    throw new Error('无法解析翻译结果，请重试')
+    return null
   }
+
+  const result = tryExtractJson(aiResponse)
+
+  if (result && result.translation) {
+    // 句子模式只需 translation 字段
+    if (type === 'sentence') {
+      return result
+    }
+    // 单词/词组模式：兼容旧格式（definitions 字符串数组）
+    // 旧格式缺 examples 字段时补默认空数组，避免丢弃可渲染的翻译结果
+    if (result.definitions && result.definitions.length > 0 && typeof result.definitions[0] === 'string') {
+      if (!Array.isArray(result.examples)) {
+        result.examples = []
+      }
+    }
+    return result
+  }
+
+  // 三种 JSON 提取均失败：把原始内容当作纯文本译文降级返回（第三方模型可能不遵守 JSON 指令）
+  // 仅当内容非空时降级；空内容仍抛错（避免静默成功返回空译文）
+  const text = (aiResponse || '').trim()
+  if (text) {
+    // 清理可能的 markdown 代码块包裹
+    const cleaned = text.replace(/^```[\w]*\n/, '').replace(/\n```$/, '').trim()
+    if (cleaned) {
+      return { translation: cleaned }
+    }
+  }
+
+  throw new Error('无法解析翻译结果，请重试')
+}
+
+// 仅当译文为单个英文单词时才查词典；多词短语 dictionaryapi.dev 不收录会 404
+// 用于 zh→en 单词模式：译文可能是 "develop software" 这样的多词短语，强行查词典必然失败且浪费请求
+const lookupWordIfSingle = async (text) => {
+  const trimmed = (text || '').trim()
+  if (!trimmed || /\s+/.test(trimmed)) {
+    return { phonetic: '', definitions: [], examples: [] }
+  }
+  return window.services.lookupWord(trimmed)
 }
 
 const translateWithGoogle = async () => {
@@ -176,7 +213,7 @@ const translateWithGoogle = async () => {
   inputType.value = type
 
   if (!window.services || !window.services.googleTranslate) {
-    throw new Error('谷歌不可用，请切换至其他引擎')
+    throw new Error('Google 翻译不可用，请切换至其他引擎')
   }
 
   const isEnToZh = lang === 'en'
@@ -201,7 +238,7 @@ const translateWithGoogle = async () => {
     }
   } else {
     const translation = await window.services.googleTranslate(inputText.value.trim(), 'zh-CN', 'en')
-    const dict = await window.services.lookupWord(translation)
+    const dict = await lookupWordIfSingle(translation)
     return {
       translation,
       phonetic: dict.phonetic || '',
@@ -211,29 +248,14 @@ const translateWithGoogle = async () => {
   }
 }
 
-const translateWithDeepL = async () => {
+// 共享 helper：用任意字典类翻译函数（DeepL/DeepLX）执行翻译 + 词典查询
+// 这两个引擎的词典查询逻辑完全一致（en→zh 查原文，zh→en 查译文且仅单词），抽出来避免拆分后代码重复
+const translateWithDictEngine = async (translateFn) => {
   const lang = detectedLanguage.value || detectLanguage(inputText.value)
   detectedLanguage.value = lang
 
   const type = detectInputType(inputText.value)
   inputType.value = type
-
-  if (!window.services) {
-    throw new Error('DeepL 翻译不可用')
-  }
-
-  // 根据接入方式选择翻译方法
-  const isOfficial = settings.deeplMode !== 'deeplx'
-  if (isOfficial && !window.services.deeplTranslate) {
-    throw new Error('DeepL 官方 API 不可用')
-  }
-  if (!isOfficial && !window.services.deeplxTranslate) {
-    throw new Error('DeepLX 不可用')
-  }
-
-  const translateFn = isOfficial
-    ? (text, from, to) => window.services.deeplTranslate(text, from, to, settings.deeplApiKey)
-    : (text, from, to) => window.services.deeplxTranslate(text, from, to, settings.deeplxServerUrl, settings.deeplxToken)
 
   const isEnToZh = lang === 'en'
 
@@ -257,7 +279,7 @@ const translateWithDeepL = async () => {
     }
   } else {
     const translation = await translateFn(inputText.value.trim(), 'zh-CN', 'en')
-    const dict = await window.services.lookupWord(translation)
+    const dict = await lookupWordIfSingle(translation)
     return {
       translation,
       phonetic: dict.phonetic || '',
@@ -265,6 +287,26 @@ const translateWithDeepL = async () => {
       examples: dict.examples || [],
     }
   }
+}
+
+// DeepL 官方 API 翻译（独立顶级引擎）
+const translateWithDeepL = async () => {
+  if (!window.services || !window.services.deeplTranslate) {
+    throw new Error('DeepL 官方 API 不可用')
+  }
+  return translateWithDictEngine(
+    (text, from, to) => window.services.deeplTranslate(text, from, to, settings.deeplApiKey)
+  )
+}
+
+// DeepLX 翻译（自部署/公共实例，独立顶级引擎）
+const translateWithDeepLX = async () => {
+  if (!window.services || !window.services.deeplxTranslate) {
+    throw new Error('DeepLX 不可用')
+  }
+  return translateWithDictEngine(
+    (text, from, to) => window.services.deeplxTranslate(text, from, to, settings.deeplxServerUrl, settings.deeplxToken)
+  )
 }
 
 // AI 翻译（语言检测、prompt 构建、utools.ai 调用、parseResult）
@@ -287,11 +329,11 @@ const translateWithAI = async () => {
   return parseResult(result.content, type)
 }
 
-// 第三方 AI 翻译（OpenAI 兼容协议，系统提示词追加到默认指令）
+// 自定义 AI 翻译（OpenAI 兼容协议，系统提示词追加到默认指令）
 const translateWithThirdpartyAI = async () => {
   const { thirdpartyAiUrl, thirdpartyAiKey, thirdpartyAiModel, thirdpartyAiSystemPrompt } = settings
   if (!thirdpartyAiUrl || !thirdpartyAiModel) {
-    throw new Error('第三方 AI 未配置完整（需填写 API 链接和模型名）')
+    throw new Error('自定义 AI 未配置完整（需填写 API 链接和模型名）')
   }
 
   const lang = detectedLanguage.value || detectLanguage(inputText.value)
@@ -318,8 +360,15 @@ const translateWithThirdpartyAI = async () => {
     { model: thirdpartyAiModel, messages, stream: false }
   )
 
+  // OpenAI 兼容协议在鉴权失败/限流/模型不存在时返回 {error:{message,...}} 而非 choices
+  // 先检查 error 字段，抛出含真实信息的错误（而非笼统的"返回空结果"），便于诊断
+  if (data && data.error) {
+    const errMsg = (typeof data.error === 'object' && data.error.message) || JSON.stringify(data.error)
+    throw new Error(`自定义 AI 错误: ${errMsg}`)
+  }
+
   const content = data?.choices?.[0]?.message?.content || ''
-  if (!content) throw new Error('第三方 AI 返回空结果')
+  if (!content) throw new Error('自定义 AI 返回空结果')
 
   // 复用 parseResult 解析（与 translateWithAI 一致）
   return parseResult(content, type)
@@ -330,6 +379,7 @@ const translateWithEngine = async (engine) => {
   switch (engine) {
     case 'google': return translateWithGoogle()
     case 'deepl': return translateWithDeepL()
+    case 'deeplx': return translateWithDeepLX()
     case 'thirdparty-ai': return translateWithThirdpartyAI()
     case 'ai':
     default: return translateWithAI()
@@ -355,6 +405,8 @@ const translate = async () => {
     clearTimeout(fallbackTimer)
     fallbackTimer = null
   }
+  // 标记本次翻译请求；旧慢请求完成后若令牌已过期则丢弃结果
+  const myRequestId = ++translateRequestId
 
   try {
     // 按 failoverOrder 顺序依次尝试引擎，首位是主引擎
@@ -362,13 +414,22 @@ const translate = async () => {
       ? settings.failoverOrder
       : ['ai']
 
-    const engineName = (e) => ({ ai: 'AI 大模型', 'thirdparty-ai': '第三方 AI', google: '谷歌', deepl: 'DeepL' })[e] || e
+    const engineName = (e) => ({ ai: 'uTools AI', 'thirdparty-ai': '自定义 AI', google: 'Google 翻译', deepl: 'DeepL 官方', deeplx: 'DeepLX 自部署' })[e] || e
     let lastErr = null
 
     for (let i = 0; i < order.length; i++) {
+      // 每个引擎尝试前再次校验，若已有更新请求发起则中止本次（避免并发翻译互相干扰）
+      if (myRequestId !== translateRequestId) {
+        return
+      }
       const engine = order[i]
       try {
-        translationResult.value = await translateWithEngine(engine)
+        const result = await translateWithEngine(engine)
+        // 回填前校验令牌：若期间用户发起了新翻译或清空了输入，丢弃本次陈旧结果
+        if (myRequestId !== translateRequestId) {
+          return
+        }
+        translationResult.value = result
         // 非首个引擎成功时，显示降级提示
         if (i > 0) {
           fallbackNotice.value = `${engineName(order[0])} 不可用，已切换到 ${engineName(engine)}`
@@ -380,18 +441,31 @@ const translate = async () => {
         }
         return
       } catch (err) {
+        // 若期间已发起新请求，不再继续轮试旧请求
+        if (myRequestId !== translateRequestId) {
+          return
+        }
         console.warn(`${engineName(engine)} 翻译失败:`, err.message)
         lastErr = err
         // 继续尝试下一个引擎
       }
     }
     // 全部失败
+    if (myRequestId !== translateRequestId) {
+      return
+    }
     error.value = lastErr ? (lastErr.message || '翻译失败，请重试') : '翻译失败，请重试'
   } catch (err) {
+    if (myRequestId !== translateRequestId) {
+      return
+    }
     console.error('Translation error:', err)
     error.value = err.message || '翻译失败，请重试'
   } finally {
-    isLoading.value = false
+    // 仅当本次仍是最新请求时才解除 loading，避免新请求的 loading 被旧请求清掉
+    if (myRequestId === translateRequestId) {
+      isLoading.value = false
+    }
   }
 }
 
@@ -446,6 +520,9 @@ const handleAcceptPolish = () => {
   inputText.value = polishedText.value
   polishedText.value = ''
   originalText.value = ''
+  // 重置手动覆盖锁：润色后文本可能语言不同，让自动检测重新接管，避免锁定在旧方向
+  isManualOverride.value = false
+  cancelDetection()
   // 更新语言检测
   detectedLanguage.value = detectLanguage(inputText.value)
 }
@@ -466,23 +543,36 @@ const toggleVariableNaming = () => {
   toggleSetting('showVariableNaming')
 }
 
+// Footer 快捷切换可循环的引擎顺序（与 SettingsPage 拖拽可配置范围保持一致，含 5 引擎）
+const FOOTER_ENGINE_CYCLE = ['ai', 'thirdparty-ai', 'google', 'deepl', 'deeplx']
+
 const toggleTranslationEngine = () => {
-  const engines = ['ai', 'google', 'deepl']
   const order = (settings.failoverOrder && settings.failoverOrder.length) ? [...settings.failoverOrder] : ['ai']
   const current = order[0]
-  const nextIndex = (engines.indexOf(current) + 1) % engines.length
-  const next = engines[nextIndex]
+  const nextIndex = (FOOTER_ENGINE_CYCLE.indexOf(current) + 1) % FOOTER_ENGINE_CYCLE.length
+  const next = FOOTER_ENGINE_CYCLE[nextIndex]
   // 移除已存在的 next，再插入首位
   const filtered = order.filter(e => e !== next)
   const newOrder = [next, ...filtered]
   updateSetting('failoverOrder', newOrder)
 }
 
+// 主引擎 → 简短标签（用于 footer 按钮显示文案，紧凑空间用缩短前缀）
+const mainEngineShortLabel = (main) => {
+  if (main === 'google') return 'Google'
+  if (main === 'deepl') return 'DeepL'
+  if (main === 'deeplx') return 'DeepLX'
+  if (main === 'thirdparty-ai') return '自定义'
+  return 'uTools'
+}
+
 const engineLabel = computed(() => {
   const main = (settings.failoverOrder && settings.failoverOrder[0]) || 'ai'
-  if (main === 'google') return 'Google 引擎翻译模式'
-  if (main === 'deepl') return 'DeepL 引擎翻译模式'
-  return 'AI 大模型翻译引擎模式'
+  if (main === 'google') return 'Google 翻译引擎模式'
+  if (main === 'deepl') return 'DeepL 官方翻译引擎模式'
+  if (main === 'deeplx') return 'DeepLX 自部署翻译引擎模式'
+  if (main === 'thirdparty-ai') return '自定义 AI 翻译引擎模式'
+  return 'uTools AI 翻译引擎模式'
 })
 
 // 打开 GitHub 仓库
@@ -493,6 +583,10 @@ const openGitHub = () => {
 // 清空输入
 const handleClear = () => {
   inputText.value = ''
+  // 取消挂起的检测定时器与 inflight AI 检测，防止清空后回填 detectedLanguage
+  cancelDetection()
+  // 让进行中的翻译请求失效，防止其完成后回填已清空的 translationResult
+  translateRequestId++
   translationResult.value = null
   error.value = ''
   detectedLanguage.value = ''
@@ -512,9 +606,12 @@ watch(inputText, (newValue) => {
     if (!isManualOverride.value) {
       runDetection(newValue)
     }
-    inputType.value = detectInputType(newValue)
+    // 注意：不在 watch 中提前 detectInputType —— 该值仅在 translate 时被消费（translateWithX 内部统一设置），
+    // 此处提前计算每次按键都同步跑多正则是浪费；ResultDisplay 也仅在 result 存在时才读取 inputType
   } else {
     // 输入为空时，重置所有状态
+    // 关键：清除挂起的检测定时器，否则 AI 策略下已 schedule 的 setTimeout 会在 500ms 后触发并回填 detectedLanguage
+    cancelDetection()
     isManualOverride.value = false
     detectedLanguage.value = ''
     inputType.value = 'word'
@@ -532,6 +629,16 @@ watch(() => props.enterAction, (action) => {
     nextTick(() => translate())
   }
 }, { immediate: true })
+
+// 组件卸载时清理定时器，防止回调写入已销毁组件的 ref
+onUnmounted(() => {
+  cancelDetection()
+  if (fallbackTimer) {
+    clearTimeout(fallbackTimer)
+    fallbackTimer = null
+  }
+  translateRequestId++ // 让任何 inflight 翻译完成后丢弃结果
+})
 </script>
 
 <template>
@@ -581,7 +688,7 @@ watch(() => props.enterAction, (action) => {
           @click="toggleTranslationEngine"
           :aria-label="engineLabel"
         >
-          <span>{{ (settings.failoverOrder && settings.failoverOrder[0]) === 'google' ? 'Google' : (settings.failoverOrder && settings.failoverOrder[0]) === 'deepl' ? 'DeepL' : 'AI' }}</span>
+          <span>{{ mainEngineShortLabel((settings.failoverOrder && settings.failoverOrder[0]) || 'ai') }}</span>
         </button>
         <button
           class="var-naming-btn"
