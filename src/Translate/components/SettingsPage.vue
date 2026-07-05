@@ -16,7 +16,8 @@ const handleStrategySelect = (strategy) => {
 
 const engineMeta = {
   ai: { icon: '🤖', name: 'AI 大模型' },
-  google: { icon: '🌐', name: 'Google 翻译' },
+  'thirdparty-ai': { icon: '🔌', name: '第三方 AI' },
+  google: { icon: '🌐', name: '谷歌' },
   deepl: { icon: '🎯', name: 'DeepL' },
 }
 
@@ -175,6 +176,19 @@ const deeplOutputs = [
                     </div>
                   </div>
                 </template>
+                <template v-else-if="selectedEngine === 'thirdparty-ai'">
+                  <div class="thirdparty-ai-config" style="margin-top: 0;">
+                    <label class="deepl-config-label">API 链接</label>
+                    <input class="deepl-api-input" type="text" :value="settings.thirdpartyAiUrl" @input="updateSetting('thirdpartyAiUrl', $event.target.value)" placeholder="https://api.openai.com/v1/chat/completions" />
+                    <label class="deepl-config-label" style="margin-top: 10px;">API Key</label>
+                    <input class="deepl-api-input" type="password" :value="settings.thirdpartyAiKey" @input="updateSetting('thirdpartyAiKey', $event.target.value)" placeholder="sk-..." />
+                    <label class="deepl-config-label" style="margin-top: 10px;">模型</label>
+                    <input class="deepl-api-input" type="text" :value="settings.thirdpartyAiModel" @input="updateSetting('thirdpartyAiModel', $event.target.value)" placeholder="gpt-4o / deepseek-chat / qwen-plus" />
+                    <label class="deepl-config-label" style="margin-top: 10px;">系统提示词（翻译时追加到默认指令）</label>
+                    <textarea class="thirdparty-ai-prompt" :value="settings.thirdpartyAiSystemPrompt" @input="updateSetting('thirdpartyAiSystemPrompt', $event.target.value)" placeholder="可选。填写后作为 system role，user role 仍放默认翻译指令。留空仅用默认指令。" rows="4"></textarea>
+                    <p class="deepl-config-hint">兼容 OpenAI 协议（Bearer Key 认证）。支持 OpenAI/DeepSeek/通义千问/Moonshot 等。系统提示词留空时仅用默认翻译指令。</p>
+                  </div>
+                </template>
                 <template v-else>
                   <div class="engine-no-config">
                     <span class="engine-no-config-icon">{{ engineMeta[selectedEngine].icon }}</span>
@@ -187,7 +201,7 @@ const deeplOutputs = [
                 <!-- 输出设置：基于主引擎（failoverOrder[0]），不随选中引擎变化 -->
                 <div class="outputs-list">
                   <div
-                    v-for="item in mainEngine === 'ai' ? aiOutputs : mainEngine === 'deepl' ? deeplOutputs : googleOutputs"
+                    v-for="item in (mainEngine === 'ai' || mainEngine === 'thirdparty-ai') ? aiOutputs : mainEngine === 'deepl' ? deeplOutputs : googleOutputs"
                     :key="item.key"
                     class="output-item"
                   >
@@ -538,6 +552,30 @@ const deeplOutputs = [
   color: var(--text-secondary, #94a3b8);
 }
 
+.thirdparty-ai-prompt {
+  width: 100%;
+  padding: 10px 12px;
+  background: white;
+  border: 1px solid rgba(226, 232, 240, 0.8);
+  border-radius: 8px;
+  font-size: 13px;
+  line-height: 1.5;
+  color: var(--text-primary, #1e293b);
+  outline: none;
+  transition: border-color 0.2s;
+  box-sizing: border-box;
+  resize: vertical;
+  font-family: inherit;
+}
+
+.thirdparty-ai-prompt:focus {
+  border-color: rgba(99, 102, 241, 0.5);
+}
+
+.thirdparty-ai-prompt::placeholder {
+  color: var(--text-secondary, #94a3b8);
+}
+
 .deepl-config-hint {
   margin-top: 8px;
   font-size: 12px;
@@ -722,6 +760,20 @@ const deeplOutputs = [
     background: rgba(30, 41, 59, 0.6);
     border-color: rgba(51, 65, 85, 0.6);
     color: var(--text-primary, #f1f5f9);
+  }
+
+  .thirdparty-ai-prompt {
+    background: rgba(30, 41, 59, 0.6);
+    border-color: rgba(51, 65, 85, 0.8);
+    color: var(--text-primary, #f1f5f9);
+  }
+
+  .thirdparty-ai-prompt:focus {
+    border-color: rgba(99, 102, 241, 0.5);
+  }
+
+  .thirdparty-ai-prompt::placeholder {
+    color: var(--text-secondary, #64748b);
   }
 
   .deepl-mode-tab {

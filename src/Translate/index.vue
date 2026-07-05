@@ -176,7 +176,7 @@ const translateWithGoogle = async () => {
   inputType.value = type
 
   if (!window.services || !window.services.googleTranslate) {
-    throw new Error('Google 翻译不可用，请切换至 AI 模式')
+    throw new Error('谷歌不可用，请切换至其他引擎')
   }
 
   const isEnToZh = lang === 'en'
@@ -287,11 +287,50 @@ const translateWithAI = async () => {
   return parseResult(result.content, type)
 }
 
+// 第三方 AI 翻译（OpenAI 兼容协议，系统提示词追加到默认指令）
+const translateWithThirdpartyAI = async () => {
+  const { thirdpartyAiUrl, thirdpartyAiKey, thirdpartyAiModel, thirdpartyAiSystemPrompt } = settings
+  if (!thirdpartyAiUrl || !thirdpartyAiModel) {
+    throw new Error('第三方 AI 未配置完整（需填写 API 链接和模型名）')
+  }
+
+  const lang = detectedLanguage.value || detectLanguage(inputText.value)
+  detectedLanguage.value = lang
+
+  const type = detectInputType(inputText.value)
+  inputType.value = type
+
+  // 默认指令（user role，含 JSON 格式要求）
+  const userPrompt = lang === 'zh'
+    ? buildChineseToEnglishPrompt(inputText.value, type)
+    : buildEnglishToChinesePrompt(inputText.value, type)
+
+  // messages：system（用户自定义，追加）+ user（默认指令）
+  const messages = []
+  if (thirdpartyAiSystemPrompt && thirdpartyAiSystemPrompt.trim()) {
+    messages.push({ role: 'system', content: thirdpartyAiSystemPrompt })
+  }
+  messages.push({ role: 'user', content: userPrompt })
+
+  const data = await window.services.requestThirdpartyAI(
+    thirdpartyAiUrl,
+    thirdpartyAiKey,
+    { model: thirdpartyAiModel, messages, stream: false }
+  )
+
+  const content = data?.choices?.[0]?.message?.content || ''
+  if (!content) throw new Error('第三方 AI 返回空结果')
+
+  // 复用 parseResult 解析（与 translateWithAI 一致）
+  return parseResult(content, type)
+}
+
 // 引擎调度函数
 const translateWithEngine = async (engine) => {
   switch (engine) {
     case 'google': return translateWithGoogle()
     case 'deepl': return translateWithDeepL()
+    case 'thirdparty-ai': return translateWithThirdpartyAI()
     case 'ai':
     default: return translateWithAI()
   }
@@ -323,7 +362,7 @@ const translate = async () => {
       ? settings.failoverOrder
       : ['ai']
 
-    const engineName = (e) => ({ ai: 'AI 大模型', google: 'Google', deepl: 'DeepL' })[e] || e
+    const engineName = (e) => ({ ai: 'AI 大模型', 'thirdparty-ai': '第三方 AI', google: '谷歌', deepl: 'DeepL' })[e] || e
     let lastErr = null
 
     for (let i = 0; i < order.length; i++) {

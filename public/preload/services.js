@@ -101,7 +101,7 @@ function withTimeout (promise, ms) {
 }
 
 // ===== 通用 POST JSON 请求（带超时，支持 http/https，用于 DeepL 官方 API 和 DeepLX） =====
-function postJson (url, body, extraHeaders) {
+function postJson (url, body, extraHeaders, timeoutMs = TIMEOUT_MS) {
   return new Promise((resolve, reject) => {
     let settled = false
     const postData = JSON.stringify(body)
@@ -128,7 +128,7 @@ function postJson (url, body, extraHeaders) {
       settled = true
       req.destroy()
       reject(new Error('请求超时'))
-    }, TIMEOUT_MS)
+    }, timeoutMs)
 
     const req = transport.request(options, (res) => {
       let data = ''
@@ -248,7 +248,7 @@ async function translateWithSources (text, from, to) {
       // 继续尝试下一个源
     }
   }
-  throw new Error('所有 Google 翻译源均失败 (' + errors.join('; ') + ')')
+  throw new Error('所有谷歌翻译源均失败 (' + errors.join('; ') + ')')
 }
 
 // ===== DeepL 官方 API 翻译 =====
@@ -362,6 +362,11 @@ window.services = {
   },
   deeplxTranslate (text, from, to, serverUrl, token) {
     return translateWithDeepLX(text, from, to, serverUrl, token)
+  },
+  requestThirdpartyAI (url, apiKey, body) {
+    return postJson(url, body, {
+      'Authorization': `Bearer ${apiKey}`
+    }, 30000)
   },
   lookupWord (word) {
     return new Promise((resolve) => {

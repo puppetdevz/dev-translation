@@ -14,11 +14,15 @@ const DEFAULT_SETTINGS = {
   showContextNote: true,        // 显示上下文说明
   detectionStrategy: 'regex',   // 语言检测策略: 'regex' | 'ai'
   translationEngine: 'ai',     // 主翻译引擎（兼容旧版本，实际主引擎由 failoverOrder[0] 决定）
-  failoverOrder: ['ai', 'google', 'deepl'], // 自动故障转移顺序: 所有引擎的有序列表，首位为主引擎，翻译失败时按此顺序依次重试
+  failoverOrder: ['ai', 'thirdparty-ai', 'google', 'deepl'], // 自动故障转移顺序: 所有引擎的有序列表，首位为主引擎，翻译失败时按此顺序依次重试
   deeplApiKey: '',              // DeepL API Key（Free 版以 :fx 结尾，注册地址 https://www.deepl.com/pro-api）
   deeplMode: 'official',        // DeepL 接入方式: 'official'（官方 API） | 'deeplx'（自部署/公共实例）
   deeplxServerUrl: '',          // DeepLX 服务器地址（如 http://localhost:1188）
   deeplxToken: '',              // DeepLX 访问令牌（可选，自部署无 token 时留空）
+  thirdpartyAiUrl: '',              // 第三方 AI API 链接（完整 endpoint，如 https://api.openai.com/v1/chat/completions）
+  thirdpartyAiKey: '',              // 第三方 AI API Key（Bearer token）
+  thirdpartyAiModel: '',            // 第三方 AI 模型名（如 gpt-4o, deepseek-chat, qwen-plus）
+  thirdpartyAiSystemPrompt: '',     // 第三方 AI 翻译时追加的系统提示词（作为 system role，user role 仍放默认指令）
 }
 
 /**
@@ -34,7 +38,16 @@ export const loadSettings = () => {
       // 兼容旧版本：若没有 failoverOrder，则用原主引擎 + 其他引擎初始化（主引擎首位）
       if (!merged.failoverOrder || !Array.isArray(merged.failoverOrder) || merged.failoverOrder.length === 0) {
         const main = merged.translationEngine || 'ai'
-        merged.failoverOrder = [main, ...['ai', 'google', 'deepl'].filter(e => e !== main)]
+        merged.failoverOrder = [main, ...['ai', 'thirdparty-ai', 'google', 'deepl'].filter(e => e !== main)]
+      }
+      // 兼容旧 failoverOrder 无 thirdparty-ai：在 ai 之后插入
+      if (Array.isArray(merged.failoverOrder) && !merged.failoverOrder.includes('thirdparty-ai')) {
+        const aiIdx = merged.failoverOrder.indexOf('ai')
+        if (aiIdx >= 0) {
+          merged.failoverOrder.splice(aiIdx + 1, 0, 'thirdparty-ai')
+        } else {
+          merged.failoverOrder.unshift('thirdparty-ai')
+        }
       }
       return merged
     }
