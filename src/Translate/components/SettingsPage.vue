@@ -60,6 +60,47 @@ const openDeeplxGuide = () => {
   window.utools.shellOpenExternal('https://github.com/OwO-Network/DeepLX')
 }
 
+// 第三方 AI 模型列表远程获取
+const fetchingModels = ref(false)
+const modelList = ref([])
+const modelListError = ref('')
+
+const handleFetchModels = async () => {
+  if (fetchingModels.value) return
+  if (!settings.thirdpartyAiUrl || !settings.thirdpartyAiUrl.trim()) {
+    modelListError.value = '请先填写 API 链接'
+    modelList.value = []
+    return
+  }
+  if (!settings.thirdpartyAiKey || !settings.thirdpartyAiKey.trim()) {
+    modelListError.value = '请先填写 API Key'
+    modelList.value = []
+    return
+  }
+  if (!window.services || !window.services.fetchThirdpartyModels) {
+    modelListError.value = '服务不可用'
+    return
+  }
+  fetchingModels.value = true
+  modelListError.value = ''
+  modelList.value = []
+  try {
+    const models = await window.services.fetchThirdpartyModels(
+      settings.thirdpartyAiUrl,
+      settings.thirdpartyAiKey
+    )
+    modelList.value = models
+  } catch (err) {
+    modelListError.value = err.message || '获取模型失败'
+  } finally {
+    fetchingModels.value = false
+  }
+}
+
+const selectModel = (model) => {
+  updateSetting('thirdpartyAiModel', model)
+}
+
 const aiOutputs = [
   { key: 'showPhonetic', label: '显示音标', desc: 'AI 生成美式 IPA 音标' },
   { key: 'showDefinitions', label: '显示释义', desc: 'AI 生成 3-5 条英文释义' },
@@ -176,14 +217,35 @@ const deeplOutputs = [
                 <template v-else-if="selectedEngine === 'thirdparty-ai'">
                   <div class="thirdparty-ai-config" style="margin-top: 0;">
                     <label class="deepl-config-label">API 链接</label>
-                    <input class="deepl-api-input" type="text" :value="settings.thirdpartyAiUrl" @input="updateSetting('thirdpartyAiUrl', $event.target.value)" placeholder="https://api.openai.com/v1/chat/completions" />
+                    <input class="deepl-api-input" type="text" :value="settings.thirdpartyAiUrl" @input="updateSetting('thirdpartyAiUrl', $event.target.value)" placeholder="https://api.openai.com/v1（只需填到 v1）" />
                     <label class="deepl-config-label" style="margin-top: 10px;">API Key</label>
                     <input class="deepl-api-input" type="password" :value="settings.thirdpartyAiKey" @input="updateSetting('thirdpartyAiKey', $event.target.value)" placeholder="sk-..." />
                     <label class="deepl-config-label" style="margin-top: 10px;">模型</label>
-                    <input class="deepl-api-input" type="text" :value="settings.thirdpartyAiModel" @input="updateSetting('thirdpartyAiModel', $event.target.value)" placeholder="gpt-4o / deepseek-chat / qwen-plus" />
+                    <div class="model-input-row">
+                      <input class="deepl-api-input model-input" type="text" :value="settings.thirdpartyAiModel" @input="updateSetting('thirdpartyAiModel', $event.target.value)" placeholder="gpt-4o / deepseek-chat / qwen-plus" />
+                      <button class="fetch-models-btn" :disabled="fetchingModels" @click="handleFetchModels">
+                        <span v-if="!fetchingModels">获取模型</span>
+                        <span v-else class="fetch-models-loading">
+                          <span class="loading-dot"></span>
+                          <span class="loading-dot"></span>
+                          <span class="loading-dot"></span>
+                        </span>
+                      </button>
+                    </div>
+                    <p v-if="modelListError" class="model-fetch-error">{{ modelListError }}</p>
+                    <div v-if="modelList.length" class="model-list">
+                      <button
+                        v-for="m in modelList"
+                        :key="m"
+                        class="model-chip"
+                        :class="{ active: m === settings.thirdpartyAiModel }"
+                        :title="m"
+                        @click="selectModel(m)"
+                      >{{ m }}</button>
+                    </div>
                     <label class="deepl-config-label" style="margin-top: 10px;">系统提示词（翻译时追加到默认指令）</label>
                     <textarea class="thirdparty-ai-prompt" :value="settings.thirdpartyAiSystemPrompt" @input="updateSetting('thirdpartyAiSystemPrompt', $event.target.value)" placeholder="可选。填写后作为 system role，user role 仍放默认翻译指令。留空仅用默认指令。" rows="4"></textarea>
-                    <p class="deepl-config-hint">兼容 OpenAI 协议（Bearer Key 认证）。支持 OpenAI/DeepSeek/通义千问/Moonshot 等。系统提示词留空时仅用默认翻译指令。</p>
+                    <p class="deepl-config-hint">兼容 OpenAI 协议（Bearer Key 认证）。API 链接只需填到 <code class="hint-code">/v1</code>，程序自动补全 <code class="hint-code">/chat/completions</code>。支持 OpenAI/DeepSeek/通义千问/Moonshot 等。系统提示词留空时仅用默认翻译指令。</p>
                   </div>
                 </template>
                 <template v-else>
@@ -559,6 +621,138 @@ const deeplOutputs = [
   color: var(--text-secondary, #94a3b8);
 }
 
+/* 模型输入框 + 获取按钮组合 */
+.model-input-row {
+  display: flex;
+  gap: 8px;
+  align-items: stretch;
+}
+
+.model-input {
+  flex: 1;
+  min-width: 0;
+}
+
+.fetch-models-btn {
+  flex-shrink: 0;
+  padding: 0 14px;
+  background: #6366f1;
+  color: #ffffff;
+  border: none;
+  border-radius: 8px;
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background 0.2s, transform 0.1s;
+  white-space: nowrap;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 76px;
+  font-family: inherit;
+}
+
+.fetch-models-btn:hover:not(:disabled) {
+  background: #4f46e5;
+}
+
+.fetch-models-btn:active:not(:disabled) {
+  transform: scale(0.97);
+}
+
+.fetch-models-btn:disabled {
+  opacity: 0.65;
+  cursor: not-allowed;
+}
+
+/* 加载中三个跳动点 */
+.fetch-models-loading {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+}
+
+.fetch-models-loading .loading-dot {
+  width: 4px;
+  height: 4px;
+  border-radius: 50%;
+  background: #ffffff;
+  animation: fetch-loading-bounce 1.2s infinite ease-in-out;
+}
+
+.fetch-models-loading .loading-dot:nth-child(2) {
+  animation-delay: 0.15s;
+}
+
+.fetch-models-loading .loading-dot:nth-child(3) {
+  animation-delay: 0.3s;
+}
+
+@keyframes fetch-loading-bounce {
+  0%, 80%, 100% { transform: scale(0.6); opacity: 0.5; }
+  40% { transform: scale(1); opacity: 1; }
+}
+
+.model-fetch-error {
+  margin-top: 6px;
+  font-size: 12px;
+  color: #ef4444;
+  line-height: 1.4;
+}
+
+.model-list {
+  margin-top: 8px;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  max-height: 160px;
+  overflow-y: auto;
+  padding: 8px;
+  background: rgba(99, 102, 241, 0.04);
+  border: 1px solid rgba(99, 102, 241, 0.15);
+  border-radius: 8px;
+}
+
+.model-chip {
+  padding: 4px 10px;
+  background: rgba(255, 255, 255, 0.9);
+  border: 1px solid rgba(203, 213, 224, 0.8);
+  border-radius: 6px;
+  font-size: 12px;
+  font-family: ui-monospace, 'SF Mono', Menlo, Consolas, monospace;
+  color: var(--text-primary, #1e293b);
+  cursor: pointer;
+  transition: background 0.15s, border-color 0.15s, color 0.15s;
+  max-width: 220px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.model-chip:hover {
+  background: rgba(99, 102, 241, 0.08);
+  border-color: rgba(99, 102, 241, 0.4);
+}
+
+.model-chip.active {
+  background: #6366f1;
+  color: #ffffff;
+  border-color: #6366f1;
+}
+
+.model-list::-webkit-scrollbar {
+  width: 6px;
+}
+
+.model-list::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.model-list::-webkit-scrollbar-thumb {
+  background: rgba(99, 102, 241, 0.3);
+  border-radius: 3px;
+}
+
 .deepl-config-hint {
   margin-top: 8px;
   font-size: 12px;
@@ -574,6 +768,15 @@ const deeplOutputs = [
 
 .deepl-link:hover {
   color: #4f46e5;
+}
+
+.hint-code {
+  font-family: ui-monospace, 'SF Mono', Menlo, Consolas, monospace;
+  font-size: 11px;
+  background: rgba(99, 102, 241, 0.1);
+  color: #6366f1;
+  padding: 1px 5px;
+  border-radius: 4px;
 }
 
 .outputs-list {
@@ -757,6 +960,33 @@ const deeplOutputs = [
 
   .thirdparty-ai-prompt::placeholder {
     color: var(--text-secondary, #64748b);
+  }
+
+  .hint-code {
+    background: rgba(99, 102, 241, 0.2);
+    color: #a5b4fc;
+  }
+
+  .model-list {
+    background: rgba(99, 102, 241, 0.1);
+    border-color: rgba(99, 102, 241, 0.25);
+  }
+
+  .model-chip {
+    background: rgba(30, 41, 59, 0.6);
+    border-color: rgba(51, 65, 85, 0.8);
+    color: var(--text-primary, #f1f5f9);
+  }
+
+  .model-chip:hover {
+    background: rgba(99, 102, 241, 0.15);
+    border-color: rgba(99, 102, 241, 0.5);
+  }
+
+  .model-chip.active {
+    background: #6366f1;
+    color: #ffffff;
+    border-color: #6366f1;
   }
 
   .settings-body::-webkit-scrollbar-thumb {

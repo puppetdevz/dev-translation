@@ -193,6 +193,67 @@ function postJson (url, body, extraHeaders, timeoutMs = TIMEOUT_MS) {
   })
 }
 
+// ===== 通用 GET JSON 请求（带超时，支持 http/https，用于第三方 AI 模型列表接口） =====
+function httpGetJson (url, extraHeaders, timeoutMs = TIMEOUT_MS) {
+  return new Promise((resolve, reject) => {
+    let settled = false
+    const urlObj = new URL(url)
+    const isHttps = urlObj.protocol === 'https:'
+    const transport = isHttps ? https : http
+    const headers = Object.assign({
+      'User-Agent': BROWSER_UA,
+      'Accept': 'application/json'
+    }, extraHeaders || {})
+
+    const timer = setTimeout(() => {
+      if (settled) return
+      settled = true
+      req.destroy()
+      reject(new Error('请求超时'))
+    }, timeoutMs)
+
+    const req = transport.get(url, { headers, timeout: timeoutMs }, (res) => {
+      let data = ''
+      res.on('data', chunk => { data += chunk })
+      res.on('error', (err) => {
+        if (settled) return
+        settled = true
+        clearTimeout(timer)
+        reject(err)
+      })
+      res.on('end', () => {
+        if (settled) return
+        settled = true
+        clearTimeout(timer)
+        // HTTP 错误状态码：构造含状态码与响应片段的错误，便于上层诊断（如 401 key 无效）
+        if (res.statusCode && res.statusCode >= 400) {
+          reject(new Error(`HTTP ${res.statusCode}: ${data.slice(0, 200)}`))
+          return
+        }
+        try {
+          resolve(JSON.parse(data))
+        } catch (err) {
+          reject(new Error('响应解析失败: ' + err.message + (data ? ' (body: ' + data.slice(0, 120) + ')' : '')))
+        }
+      })
+    })
+
+    req.on('error', (err) => {
+      if (settled) return
+      settled = true
+      clearTimeout(timer)
+      reject(err)
+    })
+
+    req.on('timeout', () => {
+      if (settled) return
+      settled = true
+      req.destroy()
+      reject(new Error('请求超时'))
+    })
+  })
+}
+
 // ===== 翻译源 1：google-translate-api-x 库（内部 batch + single 双端点回退） =====
 async function sourceLibrary (text, from, to) {
   // 用 AbortController 接入库的 requestOptions.signal，超时后真正取消底层 fetch，
@@ -374,6 +435,68 @@ async function translateWithDeepLX (text, from, to, serverUrl, token) {
   return data.data
 }
 
+// ===== 第三方 AI URL 推导 =====
+// 用户只需填到 /v1（如 https://api.openai.com/v1），程序自动补全端点路径。
+// 向下兼容：若用户已填 /chat/completions 或 /models，先剥离再重新拼接。
+function deriveThirdpartyBasePath (url) {
+  if (!url || !url.trim()) return ''
+  const trimmed = url.trim().replace(/\/+$/, '')
+  if (trimmed.endsWith('/chat/completions')) {
+    return trimmed.slice(0, -'/chat/completions'.length)
+  }
+  if (trimmed.endsWith('/models')) {
+    return trimmed.slice(0, -'/models'.length)
+  }
+  return trimmed
+}
+
+function resolveChatCompletionsUrl (url) {
+  return deriveThirdpartyBasePath(url) + '/chat/completions'
+}
+
+function resolveModelsUrl (url) {
+  return deriveThirdpartyBasePath(url) + '/models'
+}
+
+// ===== 获取第三方 AI 模型列表（OpenAI 兼容 GET /v1/models 接口） =====
+async function fetchThirdpartyModels (chatUrl, apiKey) {
+  if (!chatUrl || !chatUrl.trim()) {
+    throw new Error('未配置 API 链接')
+  }
+  if (!apiKey || !apiKey.trim()) {
+    throw new Error('未配置 API Key')
+  }
+
+  const trimmedUrl = chatUrl.trim()
+  try {
+    // 校验是合法 URL，避免 deriveThirdpartyBasePath 后拼接出无效字符串
+    // eslint-disable-next-line no-new
+    new URL(trimmedUrl)
+  } catch {
+    throw new Error('API 链接格式无效')
+  }
+
+  const modelsUrl = resolveModelsUrl(trimmedUrl)
+  const data = await httpGetJson(modelsUrl, {
+    Authorization: `Bearer ${apiKey.trim()}`
+  })
+
+  // OpenAI 标准响应：{ object: 'list', data: [{ id, object, created, owned_by }, ...] }
+  if (!data || !Array.isArray(data.data)) {
+    throw new Error('模型列表响应格式异常（期望 { data: [...] }）')
+  }
+
+  const models = data.data
+    .filter(m => m && typeof m.id === 'string' && m.id)
+    .map(m => m.id)
+
+  if (models.length === 0) {
+    throw new Error('未获取到模型（列表为空）')
+  }
+  // 去重 + 字母序排序，便于查找
+  return Array.from(new Set(models)).sort()
+}
+
 // 通过 window 对象向渲染进程注入 nodejs 能力
 window.services = {
   googleTranslate (text, from, to) {
@@ -403,9 +526,14 @@ window.services = {
     return translateWithDeepLX(text, from, to, serverUrl, token)
   },
   requestThirdpartyAI (url, apiKey, body) {
-    return postJson(url, body, {
+    // 用户只需填到 /v1，这里自动补全 /chat/completions（向下兼容已填完整路径）
+    const endpoint = resolveChatCompletionsUrl(url)
+    return postJson(endpoint, body, {
       'Authorization': `Bearer ${apiKey}`
     }, 30000)
+  },
+  fetchThirdpartyModels (chatUrl, apiKey) {
+    return fetchThirdpartyModels(chatUrl, apiKey)
   },
   lookupWord (word) {
     return new Promise((resolve) => {
