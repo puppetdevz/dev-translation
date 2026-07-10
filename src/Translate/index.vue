@@ -695,6 +695,7 @@ onUnmounted(() => {
           :isLoading="isLoading"
           :isPolishing="isPolishing"
           :polishedText="polishedText"
+          :usedEngineLabel="usedEngineLabel"
           @translate="translate"
           @clear="handleClear"
           @polish="polish"
@@ -706,10 +707,6 @@ onUnmounted(() => {
       </div>
 
       <div class="translate-result-section">
-        <div v-if="translationResult && usedEngineLabel" class="used-engine-badge" :title="`本次由 ${usedEngineLabel} 翻译`">
-          <span class="used-engine-badge-dot"></span>
-          <span class="used-engine-badge-text">由 {{ usedEngineLabel }} 翻译</span>
-        </div>
         <div v-if="fallbackNotice" class="fallback-notice">
           <span class="fallback-notice-text">{{ fallbackNotice }}</span>
           <button class="fallback-notice-close" @click="dismissFallbackNotice" aria-label="关闭提示">×</button>
@@ -991,35 +988,6 @@ onUnmounted(() => {
   box-shadow: 0 1px 3px rgba(99, 102, 241, 0.3);
 }
 
-/* 实际翻译引擎标识徽章 */
-.used-engine-badge {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  margin-bottom: 8px;
-  padding: 4px 10px;
-  background: rgba(99, 102, 241, 0.08);
-  border: 1px solid rgba(99, 102, 241, 0.2);
-  border-radius: 999px;
-  font-size: 11px;
-  font-weight: 600;
-  color: #6366f1;
-  line-height: 1.4;
-  animation: fallback-notice-fade-in 0.3s ease;
-}
-
-.used-engine-badge-dot {
-  width: 6px;
-  height: 6px;
-  border-radius: 50%;
-  background: #6366f1;
-  flex-shrink: 0;
-}
-
-.used-engine-badge-text {
-  white-space: nowrap;
-}
-
 /* 降级提示条 */
 .fallback-notice {
   display: flex;
@@ -1076,16 +1044,6 @@ onUnmounted(() => {
 }
 
 @media (prefers-color-scheme: dark) {
-  .used-engine-badge {
-    background: rgba(99, 102, 241, 0.15);
-    border-color: rgba(99, 102, 241, 0.3);
-    color: #a5b4fc;
-  }
-
-  .used-engine-badge-dot {
-    background: #a5b4fc;
-  }
-
   .fallback-notice {
     background: rgba(146, 64, 14, 0.2);
     border-color: rgba(251, 191, 36, 0.3);

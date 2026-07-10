@@ -25,6 +25,10 @@ const props = defineProps({
   polishedText: {
     type: String,
     default: ''
+  },
+  usedEngineLabel: {
+    type: String,
+    default: ''
   }
 })
 
@@ -110,7 +114,7 @@ const handleKeydown = (event) => {
       </div>
     </div>
 
-    <!-- 普通输入框（含浮动底栏） -->
+    <!-- 普通输入框（含浮动底栏：语言徽章 + 字符数） -->
     <div v-else class="input-field-wrapper">
       <textarea
         ref="textareaRef"
@@ -120,72 +124,81 @@ const handleKeydown = (event) => {
         maxlength="5000"
         @keydown="handleKeydown"
       />
-      <!-- 浮动在底部的语言徽章和字符数 -->
       <div class="input-footer">
-      <div class="language-badge"
-        :class="{ 'manual-override': isManualOverride, 'language-badge-placeholder': isDetectingPlaceholder }"
-        @click="emit('languageToggle')"
-        @contextmenu.prevent="emit('languageRedetect')"
-        :title="isDetectingPlaceholder ? '左键: 设置为中文翻译 | 输入文字后将自动识别' : (isManualOverride ? '已手动设置\n左键: 切换方向 | 右键: 重新自动识别' : '左键: 切换方向 | 右键: 重新自动识别')"
-      >
-        <span class="badge-icon">{{ isDetectingPlaceholder ? '🌐' : (detectedLanguage === 'zh' ? '🇨🇳' : '🇺🇸') }}</span>
-        <span class="badge-text">{{ isDetectingPlaceholder ? '自动识别' : languageIndicator }}</span>
-        <span v-if="!isDetectingPlaceholder && isManualOverride" class="badge-manual">🔒</span>
+        <div class="language-badge"
+          :class="{ 'manual-override': isManualOverride, 'language-badge-placeholder': isDetectingPlaceholder }"
+          @click="emit('languageToggle')"
+          @contextmenu.prevent="emit('languageRedetect')"
+          :title="isDetectingPlaceholder ? '左键: 设置为中文翻译 | 输入文字后将自动识别' : (isManualOverride ? '已手动设置\n左键: 切换方向 | 右键: 重新自动识别' : '左键: 切换方向 | 右键: 重新自动识别')"
+        >
+          <span class="badge-icon">{{ isDetectingPlaceholder ? '🌐' : (detectedLanguage === 'zh' ? '🇨🇳' : '🇺🇸') }}</span>
+          <span class="badge-text">{{ isDetectingPlaceholder ? '自动识别' : languageIndicator }}</span>
+          <span v-if="!isDetectingPlaceholder && isManualOverride" class="badge-manual">🔒</span>
+        </div>
+        <span class="char-count" :class="{ 'char-count-warning': charCount > 4500 }">
+          字符数: {{ charCount }}/5000
+        </span>
       </div>
-      <span class="char-count" :class="{ 'char-count-warning': charCount > 4500 }">
-        字符数: {{ charCount }}/5000
-      </span>
-    </div>
     </div>
 
+    <!-- 操作行：左侧引擎徽章 + 右侧按钮 -->
     <div class="input-actions">
-      <!-- 润色对比模式下的按钮 -->
-      <template v-if="polishedText">
-        <button
-          class="btn btn-reject"
-          @click="handleRejectPolish"
-        >
-          <span class="btn-icon">❌</span>
-          <span class="btn-text">拒绝</span>
-        </button>
-        <button
-          class="btn btn-accept"
-          @click="handleAcceptPolish"
-        >
-          <span class="btn-icon">✅</span>
-          <span class="btn-text">采纳</span>
-        </button>
-      </template>
+      <!-- 左侧：翻译引擎标识徽章（与按钮同行、同高） -->
+      <div v-if="usedEngineLabel" class="used-engine-badge" :title="`本次由 ${usedEngineLabel} 翻译`">
+        <span class="used-engine-badge-dot"></span>
+        <span class="used-engine-badge-text">由 {{ usedEngineLabel }} 翻译</span>
+      </div>
 
-      <!-- 普通模式下的按钮 -->
-      <template v-else>
-        <button
-          class="btn btn-clear"
-          @click="handleClear"
-          :disabled="!text"
-        >
-          <span class="btn-icon">🗑️</span>
-          <span class="btn-text">清空</span>
-        </button>
-        <button
-          class="btn btn-polish"
-          @click="handlePolish"
-          :disabled="!text || isLoading || isPolishing"
-        >
-          <span class="btn-icon" v-if="!isPolishing">✨</span>
-          <span class="btn-spinner" v-else></span>
-          <span class="btn-text">{{ isPolishing ? '润色中...' : '润色' }}</span>
-        </button>
-        <button
-          class="btn btn-translate"
-          @click="handleTranslate"
-          :disabled="!text || isLoading"
-        >
-          <span class="btn-icon" v-if="!isLoading">🌐</span>
-          <span class="btn-spinner" v-else></span>
-          <span class="btn-text">{{ isLoading ? '翻译中...' : '翻译' }}</span>
-        </button>
-      </template>
+      <!-- 右侧：操作按钮 -->
+      <div class="input-actions-btns">
+        <!-- 润色对比模式下的按钮 -->
+        <template v-if="polishedText">
+          <button
+            class="btn btn-reject"
+            @click="handleRejectPolish"
+          >
+            <span class="btn-icon">❌</span>
+            <span class="btn-text">拒绝</span>
+          </button>
+          <button
+            class="btn btn-accept"
+            @click="handleAcceptPolish"
+          >
+            <span class="btn-icon">✅</span>
+            <span class="btn-text">采纳</span>
+          </button>
+        </template>
+
+        <!-- 普通模式下的按钮 -->
+        <template v-else>
+          <button
+            class="btn btn-clear"
+            @click="handleClear"
+            :disabled="!text"
+          >
+            <span class="btn-icon">🗑️</span>
+            <span class="btn-text">清空</span>
+          </button>
+          <button
+            class="btn btn-polish"
+            @click="handlePolish"
+            :disabled="!text || isLoading || isPolishing"
+          >
+            <span class="btn-icon" v-if="!isPolishing">✨</span>
+            <span class="btn-spinner" v-else></span>
+            <span class="btn-text">{{ isPolishing ? '润色中...' : '润色' }}</span>
+          </button>
+          <button
+            class="btn btn-translate"
+            @click="handleTranslate"
+            :disabled="!text || isLoading"
+          >
+            <span class="btn-icon" v-if="!isLoading">🌐</span>
+            <span class="btn-spinner" v-else></span>
+            <span class="btn-text">{{ isLoading ? '翻译中...' : '翻译' }}</span>
+          </button>
+        </template>
+      </div>
     </div>
   </div>
 </template>
@@ -195,21 +208,9 @@ const handleKeydown = (event) => {
   display: flex;
   flex-direction: column;
   gap: 10px;
-  background: white;
-  border-radius: 12px;
-  padding: 14px;
-  border: 1px solid rgba(226, 232, 240, 0.8);
-  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.03);
-  transition: all 0.3s ease;
   box-sizing: border-box;
   max-width: 100%;
-  overflow: hidden;
   height: 100%;
-}
-
-.input-area:hover {
-  border-color: rgba(226, 232, 240, 1);
-  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.04);
 }
 
 .input-field-wrapper {
@@ -428,10 +429,60 @@ const handleKeydown = (event) => {
   background: rgba(102, 126, 234, 0.5);
 }
 
+
 .input-actions {
   display: flex;
-  justify-content: flex-end;
+  align-items: center;
+  gap: 10px;
+  flex-shrink: 0;
+}
+
+.input-actions-btns {
+  display: flex;
+  align-items: center;
   gap: 8px;
+  margin-left: auto;
+}
+
+/* 翻译引擎标识徽章（与操作按钮同行、同高） */
+.used-engine-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 10px;
+  background: rgba(99, 102, 241, 0.08);
+  border: 1px solid rgba(99, 102, 241, 0.2);
+  border-radius: 999px;
+  font-size: 11px;
+  font-weight: 600;
+  color: #6366f1;
+  line-height: 1.2;
+  flex-shrink: 0;
+  white-space: nowrap;
+  animation: used-engine-fade-in 0.3s ease;
+}
+
+.used-engine-badge-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: #6366f1;
+  flex-shrink: 0;
+}
+
+.used-engine-badge-text {
+  white-space: nowrap;
+}
+
+@keyframes used-engine-fade-in {
+  from {
+    opacity: 0;
+    transform: translateY(-2px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
 }
 
 .btn {
@@ -570,17 +621,6 @@ const handleKeydown = (event) => {
 }
 
 @media (prefers-color-scheme: dark) {
-  .input-area {
-    background: #1e293b;
-    border-color: rgba(51, 65, 85, 0.8);
-    box-shadow: 0 1px 2px rgba(0, 0, 0, 0.2);
-  }
-
-  .input-area:hover {
-    border-color: rgba(51, 65, 85, 1);
-    box-shadow: 0 2px 4px rgba(0, 0, 0, 0.25);
-  }
-
   .input-textarea {
     background-color: #0f172a;
     color: var(--text-primary, #f1f5f9);
@@ -641,6 +681,16 @@ const handleKeydown = (event) => {
     box-shadow: 0 2px 3px rgba(0, 0, 0, 0.4);
   }
 
+  .used-engine-badge {
+    background: rgba(99, 102, 241, 0.15);
+    border-color: rgba(99, 102, 241, 0.3);
+    color: #a5b4fc;
+  }
+
+  .used-engine-badge-dot {
+    background: #a5b4fc;
+  }
+
   .language-badge-placeholder {
     background: #334155;
     color: #94a3b8;
@@ -654,7 +704,6 @@ const handleKeydown = (event) => {
 
 @media (max-width: 768px) {
   .input-area {
-    padding: 12px;
     gap: 10px;
   }
 
@@ -698,14 +747,13 @@ const handleKeydown = (event) => {
 /* 小窗口优化 */
 @media (max-height: 550px) {
   .input-area {
-    padding: 10px;
     gap: 8px;
   }
 
   .input-textarea {
     min-height: 60px;
     max-height: 120px;
-    padding: 10px 10px 36px 10px;
+    padding: 10px;
     font-size: 13px;
   }
 
