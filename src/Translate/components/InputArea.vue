@@ -50,6 +50,8 @@ const languageIndicator = computed(() => {
   return props.detectedLanguage === 'zh' ? '中 → 英' : '英 → 中'
 })
 
+const isDetectingPlaceholder = computed(() => !props.detectedLanguage)
+
 const charCount = computed(() => {
   return props.modelValue.length
 })
@@ -108,33 +110,32 @@ const handleKeydown = (event) => {
       </div>
     </div>
 
-    <!-- 普通输入框 -->
-    <textarea
-      v-else
-      ref="textareaRef"
-      v-model="text"
-      class="input-textarea"
-      placeholder="请输入要翻译的内容..."
-      maxlength="5000"
-      @keydown="handleKeydown"
-    />
-
-    <!-- 输入框下方的提示信息 -->
-    <div class="input-footer" v-if="!polishedText">
+    <!-- 普通输入框（含浮动底栏） -->
+    <div v-else class="input-field-wrapper">
+      <textarea
+        ref="textareaRef"
+        v-model="text"
+        class="input-textarea"
+        placeholder="请输入要翻译的内容..."
+        maxlength="5000"
+        @keydown="handleKeydown"
+      />
+      <!-- 浮动在底部的语言徽章和字符数 -->
+      <div class="input-footer">
       <div class="language-badge"
-        :class="{ 'manual-override': isManualOverride }"
-        v-if="languageIndicator"
+        :class="{ 'manual-override': isManualOverride, 'language-badge-placeholder': isDetectingPlaceholder }"
         @click="emit('languageToggle')"
         @contextmenu.prevent="emit('languageRedetect')"
-        :title="isManualOverride ? '已手动设置\n左键: 切换方向 | 右键: 重新自动识别' : '左键: 切换方向 | 右键: 重新自动识别'"
+        :title="isDetectingPlaceholder ? '左键: 设置为中文翻译 | 输入文字后将自动识别' : (isManualOverride ? '已手动设置\n左键: 切换方向 | 右键: 重新自动识别' : '左键: 切换方向 | 右键: 重新自动识别')"
       >
-        <span class="badge-icon">{{ detectedLanguage === 'zh' ? '🇨🇳' : '🇺🇸' }}</span>
-        <span class="badge-text">{{ languageIndicator }}</span>
-        <span v-if="isManualOverride" class="badge-manual">🔒</span>
+        <span class="badge-icon">{{ isDetectingPlaceholder ? '🌐' : (detectedLanguage === 'zh' ? '🇨🇳' : '🇺🇸') }}</span>
+        <span class="badge-text">{{ isDetectingPlaceholder ? '自动识别' : languageIndicator }}</span>
+        <span v-if="!isDetectingPlaceholder && isManualOverride" class="badge-manual">🔒</span>
       </div>
       <span class="char-count" :class="{ 'char-count-warning': charCount > 4500 }">
         字符数: {{ charCount }}/5000
       </span>
+    </div>
     </div>
 
     <div class="input-actions">
@@ -211,11 +212,27 @@ const handleKeydown = (event) => {
   box-shadow: 0 2px 4px rgba(0, 0, 0, 0.04);
 }
 
+.input-field-wrapper {
+  position: relative;
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+}
+
 .input-footer {
+  position: absolute;
+  bottom: 8px;
+  left: 12px;
+  right: 12px;
   display: flex;
   justify-content: space-between;
   align-items: center;
   gap: 8px;
+  pointer-events: none;
+  background: linear-gradient(to top, var(--input-footer-bg, #fafbfc) 65%, transparent);
+  padding: 8px 0 2px 0;
+  z-index: 1;
 }
 
 .language-badge {
@@ -232,6 +249,7 @@ const handleKeydown = (event) => {
   animation: fadeIn 0.3s ease;
   cursor: pointer;
   user-select: none;
+  pointer-events: auto;
   transition: opacity 0.2s, transform 0.2s;
 }
 
@@ -243,6 +261,19 @@ const handleKeydown = (event) => {
 .language-badge.manual-override {
   background: linear-gradient(135deg, #f59e0b 0%, #d97706 100%);
   box-shadow: 0 1px 3px rgba(245, 158, 11, 0.3);
+}
+
+.language-badge-placeholder {
+  background: #f1f5f9;
+  color: #94a3b8;
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.04);
+  font-weight: 500;
+  animation: none;
+}
+
+.language-badge-placeholder:hover {
+  background: #e2e8f0;
+  opacity: 1;
 }
 
 .badge-manual {
@@ -274,7 +305,7 @@ const handleKeydown = (event) => {
   width: 100%;
   flex: 1;
   min-height: 70px;
-  padding: 12px;
+  padding: 12px 12px 42px 12px;
   border: 1px solid rgba(226, 232, 240, 0.6);
   border-radius: 10px;
   background-color: #fafbfc;
@@ -562,6 +593,10 @@ const handleKeydown = (event) => {
     box-shadow: 0 0 0 3px rgba(102, 126, 234, 0.12);
   }
 
+  .input-footer {
+    --input-footer-bg: #0f172a;
+  }
+
   /* 深色模式输入框滚动条 */
   .input-textarea::-webkit-scrollbar-thumb {
     background: rgba(102, 126, 234, 0.4);
@@ -604,6 +639,16 @@ const handleKeydown = (event) => {
   .btn-clear:hover:not(:disabled) {
     background: #1e293b;
     box-shadow: 0 2px 3px rgba(0, 0, 0, 0.4);
+  }
+
+  .language-badge-placeholder {
+    background: #334155;
+    color: #94a3b8;
+    box-shadow: 0 1px 2px rgba(0, 0, 0, 0.2);
+  }
+
+  .language-badge-placeholder:hover {
+    background: #475569;
   }
 }
 
@@ -660,7 +705,7 @@ const handleKeydown = (event) => {
   .input-textarea {
     min-height: 60px;
     max-height: 120px;
-    padding: 10px;
+    padding: 10px 10px 36px 10px;
     font-size: 13px;
   }
 
