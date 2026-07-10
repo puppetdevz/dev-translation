@@ -22,6 +22,8 @@ const DEFAULT_SETTINGS = {
   thirdpartyAiKey: '',              // 第三方 AI API Key（Bearer token）
   thirdpartyAiModel: '',            // 第三方 AI 模型名（如 gpt-4o, deepseek-chat, qwen-plus）
   thirdpartyAiSystemPrompt: '',     // 第三方 AI 翻译时追加的系统提示词（作为 system role，user role 仍放默认指令）
+  logLevel: 'error',                // 日志记录等级: 'debug' | 'info' | 'error'（默认仅记录错误，便于排查翻译失败）
+  logRetentionDays: 7,              // 日志保留天数: 1/3/7/0(永久)，到期自动清理；始终受最大条数封顶
 }
 
 // 已知引擎白名单：loadSettings 会用它过滤 failoverOrder，剔除未知/废弃的引擎标识，防止渲染时 engineMeta[engine] 为 undefined 致白屏

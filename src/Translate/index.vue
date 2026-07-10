@@ -9,6 +9,8 @@ import {
   buildPolishPrompt
 } from './prompts/index.js'
 import { useSettings } from './utils/useSettings.js'
+import { logger } from './utils/logger.js'
+import { recordEngineResult } from './utils/engineStats.js'
 
 const props = defineProps({
   enterAction: {
@@ -33,6 +35,8 @@ const error = ref('')
 // 降级提示状态
 const fallbackNotice = ref('')
 let fallbackTimer = null
+// 本次成功翻译最终使用的引擎标识（如 'ai'/'deepl' 等），用于结果区显示，方便用户感知各引擎稳定性
+const usedEngine = ref('')
 // 翻译请求令牌：每次翻译自增，结果回填前校验是否仍是最新请求，丢弃旧慢请求的覆盖
 let translateRequestId = 0
 
@@ -401,6 +405,7 @@ const translate = async () => {
   error.value = ''
   translationResult.value = null
   fallbackNotice.value = ''
+  usedEngine.value = ''
   if (fallbackTimer) {
     clearTimeout(fallbackTimer)
     fallbackTimer = null
@@ -424,12 +429,16 @@ const translate = async () => {
       }
       const engine = order[i]
       try {
+        logger.debug(engine, `尝试翻译（优先级 P${i + 1}）`, { text: inputText.value.trim().slice(0, 100) })
         const result = await translateWithEngine(engine)
         // 回填前校验令牌：若期间用户发起了新翻译或清空了输入，丢弃本次陈旧结果
         if (myRequestId !== translateRequestId) {
           return
         }
         translationResult.value = result
+        usedEngine.value = engine
+        logger.info(engine, '翻译成功')
+        recordEngineResult(engine, true)
         // 非首个引擎成功时，显示降级提示
         if (i > 0) {
           fallbackNotice.value = `${engineName(order[0])} 不可用，已切换到 ${engineName(engine)}`
@@ -446,6 +455,8 @@ const translate = async () => {
           return
         }
         console.warn(`${engineName(engine)} 翻译失败:`, err.message)
+        logger.error(engine, `${engineName(engine)} 翻译失败`, { message: err.message, stack: err.stack || '' })
+        recordEngineResult(engine, false)
         lastErr = err
         // 继续尝试下一个引擎
       }
@@ -455,12 +466,14 @@ const translate = async () => {
       return
     }
     error.value = lastErr ? (lastErr.message || '翻译失败，请重试') : '翻译失败，请重试'
+    logger.error('system', '所有引擎均失败', { text: inputText.value.trim().slice(0, 100), error: lastErr?.message || '' })
   } catch (err) {
     if (myRequestId !== translateRequestId) {
       return
     }
     console.error('Translation error:', err)
     error.value = err.message || '翻译失败，请重试'
+    logger.error('system', '翻译流程异常', { message: err.message, stack: err.stack || '' })
   } finally {
     // 仅当本次仍是最新请求时才解除 loading，避免新请求的 loading 被旧请求清掉
     if (myRequestId === translateRequestId) {
@@ -509,6 +522,7 @@ const polish = async () => {
     polishedText.value = polished
   } catch (err) {
     console.error('Polish error:', err)
+    logger.error('ai', '文本润色失败', { message: err.message, stack: err.stack || '' })
     error.value = err.message || '润色失败，请重试'
   } finally {
     isPolishing.value = false
@@ -566,11 +580,19 @@ const mainEngineShortLabel = (main) => {
   return 'uTools'
 }
 
+// 本次成功翻译所用引擎的展示名（用于结果区小徽章，帮助用户判断各引擎可用性）
+const usedEngineLabel = computed(() => {
+  const e = usedEngine.value
+  if (!e) return ''
+  const names = { ai: 'uTools AI', 'thirdparty-ai': '自定义 AI', google: 'Google', deepl: 'DeepL', deeplx: 'DeepLX' }
+  return names[e] || e
+})
+
 const engineLabel = computed(() => {
   const main = (settings.failoverOrder && settings.failoverOrder[0]) || 'ai'
   if (main === 'google') return 'Google 翻译引擎模式'
-  if (main === 'deepl') return 'DeepL 官方翻译引擎模式'
-  if (main === 'deeplx') return 'DeepLX 自部署翻译引擎模式'
+  if (main === 'deepl') return 'DeepL 翻译引擎模式'
+  if (main === 'deeplx') return 'DeepLX 翻译引擎模式'
   if (main === 'thirdparty-ai') return '自定义 AI 翻译引擎模式'
   return 'uTools AI 翻译引擎模式'
 })
@@ -593,6 +615,7 @@ const handleClear = () => {
   inputType.value = 'word'
   polishedText.value = ''
   originalText.value = ''
+  usedEngine.value = ''
 }
 
 // 重试
@@ -619,6 +642,7 @@ watch(inputText, (newValue) => {
     error.value = ''
     polishedText.value = ''
     originalText.value = ''
+    usedEngine.value = ''
   }
 })
 
@@ -663,6 +687,10 @@ onUnmounted(() => {
       </div>
 
       <div class="translate-result-section">
+        <div v-if="translationResult && usedEngineLabel" class="used-engine-badge" :title="`本次由 ${usedEngineLabel} 翻译`">
+          <span class="used-engine-badge-dot"></span>
+          <span class="used-engine-badge-text">由 {{ usedEngineLabel }} 翻译</span>
+        </div>
         <div v-if="fallbackNotice" class="fallback-notice">
           <span class="fallback-notice-text">{{ fallbackNotice }}</span>
           <button class="fallback-notice-close" @click="dismissFallbackNotice" aria-label="关闭提示">×</button>
@@ -944,6 +972,35 @@ onUnmounted(() => {
   box-shadow: 0 1px 3px rgba(99, 102, 241, 0.3);
 }
 
+/* 实际翻译引擎标识徽章 */
+.used-engine-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  margin-bottom: 8px;
+  padding: 4px 10px;
+  background: rgba(99, 102, 241, 0.08);
+  border: 1px solid rgba(99, 102, 241, 0.2);
+  border-radius: 999px;
+  font-size: 11px;
+  font-weight: 600;
+  color: #6366f1;
+  line-height: 1.4;
+  animation: fallback-notice-fade-in 0.3s ease;
+}
+
+.used-engine-badge-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: #6366f1;
+  flex-shrink: 0;
+}
+
+.used-engine-badge-text {
+  white-space: nowrap;
+}
+
 /* 降级提示条 */
 .fallback-notice {
   display: flex;
@@ -1000,6 +1057,16 @@ onUnmounted(() => {
 }
 
 @media (prefers-color-scheme: dark) {
+  .used-engine-badge {
+    background: rgba(99, 102, 241, 0.15);
+    border-color: rgba(99, 102, 241, 0.3);
+    color: #a5b4fc;
+  }
+
+  .used-engine-badge-dot {
+    background: #a5b4fc;
+  }
+
   .fallback-notice {
     background: rgba(146, 64, 14, 0.2);
     border-color: rgba(251, 191, 36, 0.3);
