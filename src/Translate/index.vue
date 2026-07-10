@@ -368,7 +368,16 @@ const translateWithThirdpartyAI = async () => {
   // 先检查 error 字段，抛出含真实信息的错误（而非笼统的"返回空结果"），便于诊断
   if (data && data.error) {
     const errMsg = (typeof data.error === 'object' && data.error.message) || JSON.stringify(data.error)
-    throw new Error(`自定义 AI 错误: ${errMsg}`)
+    const err = new Error(`自定义 AI 错误: ${errMsg}`)
+    // postJson 此处未抛错（HTTP 200），手动补充请求上下文供日志诊断
+    err.request = {
+      method: 'POST',
+      url: thirdpartyAiUrl,
+      model: thirdpartyAiModel,
+      messages: messages.map(m => ({ role: m.role, content: m.content }))
+    }
+    err.response = data
+    throw err
   }
 
   const content = data?.choices?.[0]?.message?.content || ''
@@ -455,7 +464,11 @@ const translate = async () => {
           return
         }
         console.warn(`${engineName(engine)} 翻译失败:`, err.message)
-        logger.error(engine, `${engineName(engine)} 翻译失败`, { message: err.message, stack: err.stack || '' })
+        // 失败时把实际请求/响应附入日志详情，便于诊断（HTTP 错误、鉴权失败、超时等）
+        const errDetail = { message: err.message, stack: err.stack || '' }
+        if (err.request) errDetail.request = err.request
+        if (err.response) errDetail.response = err.response
+        logger.error(engine, `${engineName(engine)} 翻译失败`, errDetail)
         recordEngineResult(engine, false)
         lastErr = err
         // 继续尝试下一个引擎
@@ -466,14 +479,20 @@ const translate = async () => {
       return
     }
     error.value = lastErr ? (lastErr.message || '翻译失败，请重试') : '翻译失败，请重试'
-    logger.error('system', '所有引擎均失败', { text: inputText.value.trim().slice(0, 100), error: lastErr?.message || '' })
+    const allFailDetail = { text: inputText.value.trim().slice(0, 100), error: lastErr?.message || '' }
+    if (lastErr && lastErr.request) allFailDetail.request = lastErr.request
+    if (lastErr && lastErr.response) allFailDetail.response = lastErr.response
+    logger.error('system', '所有引擎均失败', allFailDetail)
   } catch (err) {
     if (myRequestId !== translateRequestId) {
       return
     }
     console.error('Translation error:', err)
     error.value = err.message || '翻译失败，请重试'
-    logger.error('system', '翻译流程异常', { message: err.message, stack: err.stack || '' })
+    const flowErrDetail = { message: err.message, stack: err.stack || '' }
+    if (err.request) flowErrDetail.request = err.request
+    if (err.response) flowErrDetail.response = err.response
+    logger.error('system', '翻译流程异常', flowErrDetail)
   } finally {
     // 仅当本次仍是最新请求时才解除 loading，避免新请求的 loading 被旧请求清掉
     if (myRequestId === translateRequestId) {
