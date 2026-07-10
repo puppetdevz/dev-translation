@@ -1,6 +1,6 @@
 <script lang="ts" setup>
 import { computed, ref } from 'vue'
-import { copyText } from '../utils/clipboard.js'
+import { useCopyToast } from '../utils/useCopyToast.js'
 
 const props = defineProps({
   result: {
@@ -27,9 +27,10 @@ const props = defineProps({
   }
 })
 
+const { toastVisible, toastText, copyWithToast } = useCopyToast()
+
 // 发音状态
 const isSpeaking = ref(false)
-const speakingTarget = ref('') // 'original' 或 'translation'
 
 // 发音功能
 const speak = (text, lang = 'en-US') => {
@@ -46,38 +47,18 @@ const speak = (text, lang = 'en-US') => {
 
   utterance.onend = () => {
     isSpeaking.value = false
-    speakingTarget.value = ''
   }
 
   utterance.onerror = () => {
     isSpeaking.value = false
-    speakingTarget.value = ''
   }
 
   window.speechSynthesis.speak(utterance)
 }
 
-// 获取发音语言
-const getSpeakLang = (type) => {
-  if (props.detectedLanguage === 'zh') {
-    // 中译英：原文是中文，翻译是英文
-    return type === 'original' ? 'zh-CN' : 'en-US'
-  } else {
-    // 英译中：原文是英文，翻译是中文
-    return type === 'original' ? 'en-US' : 'zh-CN'
-  }
-}
-
-// 点击原文发音
-const speakOriginal = () => {
-  speakingTarget.value = 'original'
-  speak(props.originalText, getSpeakLang('original'))
-}
-
-// 点击翻译发音
-const speakTranslation = () => {
-  speakingTarget.value = 'translation'
-  speak(props.result.translation, getSpeakLang('translation'))
+// 音标点击 -> 朗读对应的英文文本
+const speakPhonetic = () => {
+  speak(getEnglishSource(), 'en-US')
 }
 
 // 高亮关键词
@@ -150,17 +131,8 @@ const variableNames = computed(() => {
     <!-- 单词头部 -->
     <div class="word-header">
       <div class="word-info">
-        <h2 class="word-text">{{ result.translation }}</h2>
-        <span v-if="settings.showPhonetic && result.phonetic" class="phonetic">{{ result.phonetic }}</span>
-      </div>
-      <div class="word-actions">
-        <button class="btn-speak" :class="{ active: isSpeaking && speakingTarget === 'translation' }"
-          @click="speakTranslation" :disabled="isSpeaking">
-          <span class="speak-icon">{{ isSpeaking && speakingTarget === 'translation' ? '🔊' : '🔈' }}</span>
-        </button>
-        <button class="btn-copy-main" @click="copyText(result.translation)">
-          <span class="copy-icon">📋</span>
-        </button>
+        <h2 class="word-text" @click="copyWithToast(result.translation)">{{ result.translation }}</h2>
+        <span v-if="settings.showPhonetic && result.phonetic" class="phonetic" :class="{ speaking: isSpeaking }" @click="speakPhonetic">{{ result.phonetic }}</span>
       </div>
     </div>
 
@@ -186,7 +158,7 @@ const variableNames = computed(() => {
         <span class="variable-label">变量命名</span>
       </div>
       <div class="variable-list">
-        <div v-for="item in variableNames" :key="item.label" class="variable-item" @click="copyText(item.value)">
+        <div v-for="item in variableNames" :key="item.label" class="variable-item" @click="copyWithToast(item.value)">
           <span class="variable-format">{{ item.label }}</span>
           <code class="variable-value">{{ item.value }}</code>
         </div>
@@ -202,6 +174,10 @@ const variableNames = computed(() => {
       <p class="context-text">{{ result.contextNote }}</p>
     </div>
 
+    <!-- 复制成功提示 -->
+    <Transition name="toast">
+      <div v-if="toastVisible" class="copy-toast">{{ toastText }}</div>
+    </Transition>
   </div>
 </template>
 
@@ -216,7 +192,6 @@ const variableNames = computed(() => {
 /* 单词头部 */
 .word-header {
   display: flex;
-  justify-content: space-between;
   align-items: flex-start;
   padding: 12px;
   background: white;
@@ -236,6 +211,12 @@ const variableNames = computed(() => {
   color: var(--text-primary, #1e293b);
   margin: 0 0 6px 0;
   line-height: 1.3;
+  cursor: pointer;
+  transition: color 0.2s ease;
+}
+
+.word-text:hover {
+  color: #667eea;
 }
 
 .phonetic {
@@ -243,49 +224,20 @@ const variableNames = computed(() => {
   font-family: 'Lucida Sans Unicode', 'Arial Unicode MS', sans-serif;
   color: #667eea;
   font-weight: 600;
-}
-
-.word-actions {
-  display: flex;
-  gap: 8px;
-  flex-shrink: 0;
-}
-
-.btn-speak,
-.btn-copy-main {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  width: 36px;
-  height: 36px;
-  border: 1px solid rgba(102, 126, 234, 0.3);
-  border-radius: 8px;
-  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-  color: white;
-  font-size: 16px;
   cursor: pointer;
-  transition: all 0.2s ease;
-  box-shadow: 0 1px 3px rgba(102, 126, 234, 0.2);
+  transition: color 0.2s ease, opacity 0.2s ease;
 }
 
-.btn-speak:hover,
-.btn-copy-main:hover {
-  transform: translateY(-1px);
-  box-shadow: 0 2px 4px rgba(102, 126, 234, 0.25);
-}
-
-.btn-speak.active {
-  background: linear-gradient(135deg, #764ba2 0%, #667eea 100%);
-}
-
-.btn-speak:disabled {
+.phonetic:hover {
   opacity: 0.7;
-  cursor: not-allowed;
 }
 
-.speak-icon,
-.copy-icon {
-  font-size: 16px;
+.phonetic.speaking {
+  color: #764ba2;
+  text-decoration: underline;
+  text-underline-offset: 3px;
+  text-decoration-style: wavy;
+  text-decoration-color: rgba(118, 75, 162, 0.4);
 }
 
 /* 释义列表 */
@@ -447,6 +399,42 @@ const variableNames = computed(() => {
   }
 }
 
+/* 复制成功 Toast */
+.copy-toast {
+  position: fixed;
+  bottom: 20px;
+  left: 50%;
+  transform: translateX(-50%);
+  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+  color: white;
+  font-size: 12px;
+  font-weight: 600;
+  padding: 6px 14px;
+  border-radius: 999px;
+  box-shadow: 0 2px 8px rgba(102, 126, 234, 0.35);
+  white-space: nowrap;
+  pointer-events: none;
+  z-index: 9999;
+}
+
+.toast-enter-active {
+  transition: all 0.3s ease;
+}
+
+.toast-leave-active {
+  transition: all 0.2s ease;
+}
+
+.toast-enter-from {
+  opacity: 0;
+  transform: translateX(-50%) translateY(10px);
+}
+
+.toast-leave-to {
+  opacity: 0;
+  transform: translateX(-50%) translateY(-4px);
+}
+
 /* 深色模式 */
 @media (prefers-color-scheme: dark) {
   .variable-naming {
@@ -499,6 +487,23 @@ const variableNames = computed(() => {
     color: var(--text-secondary, #64748b);
   }
 
+  .word-text:hover {
+    color: #a5b4fc;
+  }
+
+  .phonetic {
+    color: #a5b4fc;
+  }
+
+  .phonetic:hover {
+    opacity: 0.6;
+  }
+
+  .phonetic.speaking {
+    color: #c084fc;
+    text-decoration-color: rgba(192, 132, 252, 0.4);
+  }
+
   .context-note {
     background: #0f172a;
     border-color: rgba(51, 65, 85, 0.6);
@@ -525,12 +530,6 @@ const variableNames = computed(() => {
 
   .phonetic {
     font-size: 13px;
-  }
-
-  .btn-speak,
-  .btn-copy-main {
-    width: 32px;
-    height: 32px;
   }
 
   .definition-item {

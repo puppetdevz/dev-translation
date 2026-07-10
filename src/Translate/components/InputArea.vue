@@ -432,7 +432,7 @@ const handleKeydown = (event) => {
 
 .input-actions {
   display: flex;
-  align-items: center;
+  align-items: flex-end;
   gap: 10px;
   flex-shrink: 0;
 }
@@ -440,7 +440,7 @@ const handleKeydown = (event) => {
 .input-actions-btns {
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: 10px;
   margin-left: auto;
 }
 
@@ -488,17 +488,17 @@ const handleKeydown = (event) => {
 .btn {
   display: flex;
   align-items: center;
-  gap: 4px;
-  padding: 6px 12px;
-  border: none;
-  border-radius: 6px;
-  font-size: 12px;
+  gap: 6px;
+  padding: 7px 16px;
+  border: 1px solid transparent;
+  border-radius: 10px;
+  font-size: 13px;
   font-weight: 600;
   cursor: pointer;
-  transition: all 0.2s ease;
+  transition: all 0.25s ease;
   position: relative;
   overflow: hidden;
-  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.05);
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.04);
 }
 
 .btn::before {
@@ -521,6 +521,7 @@ const handleKeydown = (event) => {
 
 .btn-icon {
   font-size: 13px;
+  transition: transform 0.2s ease;
 }
 
 .btn-text {
@@ -528,79 +529,86 @@ const handleKeydown = (event) => {
   z-index: 1;
 }
 
+.btn:hover:not(:disabled) .btn-icon {
+  transform: scale(1.15);
+}
+
 .btn-clear {
   background: #f1f5f9;
   color: #475569;
-  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.05);
+  border-color: rgba(226, 232, 240, 0.8);
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.04);
 }
 
 .btn-clear:hover:not(:disabled) {
   background: #e2e8f0;
+  border-color: rgba(203, 213, 225, 0.9);
   transform: translateY(-1px);
-  box-shadow: 0 2px 3px rgba(0, 0, 0, 0.08);
+  box-shadow: 0 2px 5px rgba(0, 0, 0, 0.07);
 }
 
 .btn-polish {
   background: #ec4899;
   color: white;
-  box-shadow: 0 1px 2px rgba(236, 72, 153, 0.3);
+  box-shadow: 0 1px 3px rgba(236, 72, 153, 0.25);
 }
 
 .btn-polish:hover:not(:disabled) {
   background: #db2777;
-  transform: translateY(-1px);
-  box-shadow: 0 2px 3px rgba(236, 72, 153, 0.4);
+  transform: translateY(-1.5px);
+  box-shadow: 0 4px 8px rgba(236, 72, 153, 0.35);
 }
 
 .btn-translate {
-  background: #6366f1;
+  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
   color: white;
-  box-shadow: 0 1px 2px rgba(99, 102, 241, 0.3);
+  box-shadow: 0 2px 4px rgba(102, 126, 234, 0.3);
 }
 
 .btn-translate:hover:not(:disabled) {
-  background: #4f46e5;
-  transform: translateY(-1px);
-  box-shadow: 0 2px 3px rgba(99, 102, 241, 0.4);
+  background: linear-gradient(135deg, #5a6fe0 0%, #6a4196 100%);
+  transform: translateY(-1.5px);
+  box-shadow: 0 4px 10px rgba(102, 126, 234, 0.4);
 }
 
 .btn-accept {
   background: #10b981;
   color: white;
-  box-shadow: 0 1px 2px rgba(16, 185, 129, 0.3);
+  box-shadow: 0 1px 3px rgba(16, 185, 129, 0.25);
 }
 
 .btn-accept:hover:not(:disabled) {
   background: #059669;
-  transform: translateY(-1px);
-  box-shadow: 0 2px 3px rgba(16, 185, 129, 0.4);
+  transform: translateY(-1.5px);
+  box-shadow: 0 4px 8px rgba(16, 185, 129, 0.35);
 }
 
 .btn-reject {
   background: #ef4444;
   color: white;
-  box-shadow: 0 1px 2px rgba(239, 68, 68, 0.3);
+  box-shadow: 0 1px 3px rgba(239, 68, 68, 0.25);
 }
 
 .btn-reject:hover:not(:disabled) {
   background: #dc2626;
-  transform: translateY(-1px);
-  box-shadow: 0 2px 3px rgba(239, 68, 68, 0.4);
+  transform: translateY(-1.5px);
+  box-shadow: 0 4px 8px rgba(239, 68, 68, 0.35);
 }
 
 .btn:disabled {
-  opacity: 0.5;
+  opacity: 0.45;
   cursor: not-allowed;
   transform: none !important;
+  box-shadow: none !important;
 }
 
 .btn-spinner {
-  width: 16px;
-  height: 16px;
-  border: 2px solid rgba(255, 255, 255, 0.3);
+  width: 18px;
+  height: 18px;
+  border: 2.5px solid rgba(255, 255, 255, 0.25);
   border-top-color: white;
   border-radius: 50%;
-  animation: spin 0.8s linear infinite;
+  animation: spin 0.7s linear infinite;
 }
 
 @keyframes spin {
@@ -671,14 +679,53 @@ const handleKeydown = (event) => {
   }
 
   .btn-clear {
-    background: #0f172a;
-    color: #f1f5f9;
+    background: #1e293b;
+    color: #e2e8f0;
+    border-color: rgba(51, 65, 85, 0.8);
     box-shadow: 0 1px 2px rgba(0, 0, 0, 0.3);
   }
 
   .btn-clear:hover:not(:disabled) {
-    background: #1e293b;
-    box-shadow: 0 2px 3px rgba(0, 0, 0, 0.4);
+    background: #334155;
+    border-color: rgba(71, 85, 105, 0.9);
+    box-shadow: 0 2px 4px rgba(0, 0, 0, 0.4);
+  }
+
+  .btn-polish {
+    box-shadow: 0 1px 3px rgba(236, 72, 153, 0.2);
+  }
+
+  .btn-polish:hover:not(:disabled) {
+    box-shadow: 0 4px 8px rgba(236, 72, 153, 0.3);
+  }
+
+  .btn-translate {
+    box-shadow: 0 2px 4px rgba(102, 126, 234, 0.25);
+  }
+
+  .btn-translate:hover:not(:disabled) {
+    box-shadow: 0 4px 10px rgba(102, 126, 234, 0.35);
+  }
+
+  .btn-accept {
+    box-shadow: 0 1px 3px rgba(16, 185, 129, 0.2);
+  }
+
+  .btn-accept:hover:not(:disabled) {
+    box-shadow: 0 4px 8px rgba(16, 185, 129, 0.3);
+  }
+
+  .btn-reject {
+    box-shadow: 0 1px 3px rgba(239, 68, 68, 0.2);
+  }
+
+  .btn-reject:hover:not(:disabled) {
+    box-shadow: 0 4px 8px rgba(239, 68, 68, 0.3);
+  }
+
+  .btn-spinner {
+    border-color: rgba(255, 255, 255, 0.2);
+    border-top-color: white;
   }
 
   .used-engine-badge {
@@ -734,7 +781,7 @@ const handleKeydown = (event) => {
   }
 
   .btn {
-    padding: 6px 12px;
+    padding: 7px 14px;
     font-size: 12px;
   }
 
@@ -758,7 +805,7 @@ const handleKeydown = (event) => {
   }
 
   .btn {
-    padding: 5px 10px;
+    padding: 6px 12px;
     font-size: 11px;
   }
 

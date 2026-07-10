@@ -1,7 +1,7 @@
 <script lang="ts" setup>
 import { computed } from 'vue'
 import WordResult from './WordResult.vue'
-import { copyText } from '../utils/clipboard.js'
+import { useCopyToast } from '../utils/useCopyToast.js'
 
 const props = defineProps({
   result: {
@@ -41,6 +41,8 @@ const props = defineProps({
 })
 
 const emit = defineEmits(['retry'])
+
+const { toastVisible, toastText, copyWithToast } = useCopyToast()
 
 const handleRetry = () => {
   emit('retry')
@@ -85,12 +87,14 @@ const handleRetry = () => {
       <template v-else-if="result && inputType === 'sentence'">
         <div class="sentence-result">
           <div class="sentence-card">
-            <p class="translation-text">{{ result.translation }}</p>
-            <button class="btn-copy" @click="copyText(result.translation)">
-              <span class="copy-icon">📋</span>
-            </button>
+            <p class="translation-text" @click="copyWithToast(result.translation)">{{ result.translation }}</p>
           </div>
         </div>
+
+        <!-- 复制成功提示 -->
+        <Transition name="toast">
+          <div v-if="toastVisible" class="copy-toast">{{ toastText }}</div>
+        </Transition>
       </template>
 
       <!-- 空状态内容 - 无内容 -->
@@ -221,7 +225,6 @@ const handleRetry = () => {
 
 .sentence-card {
   display: flex;
-  justify-content: space-between;
   align-items: flex-start;
   gap: 12px;
   padding: 14px;
@@ -257,31 +260,12 @@ const handleRetry = () => {
   line-height: 1.6;
   flex: 1;
   word-break: break-word;
-}
-
-.btn-copy {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  padding: 8px;
-  border: 1px solid rgba(102, 126, 234, 0.3);
-  border-radius: 8px;
-  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-  color: white;
-  font-size: 16px;
   cursor: pointer;
-  transition: all 0.2s ease;
-  box-shadow: 0 1px 3px rgba(102, 126, 234, 0.2);
-  flex-shrink: 0;
+  transition: color 0.2s ease;
 }
 
-.btn-copy:hover {
-  transform: translateY(-1px);
-  box-shadow: 0 2px 4px rgba(102, 126, 234, 0.25);
-}
-
-.copy-icon {
-  font-size: 16px;
+.translation-text:hover {
+  color: #667eea;
 }
 
 @media (prefers-color-scheme: dark) {
@@ -313,6 +297,10 @@ const handleRetry = () => {
 
   .translation-text {
     color: var(--text-primary, #f1f5f9);
+  }
+
+  .translation-text:hover {
+    color: #a5b4fc;
   }
 }
 
@@ -355,5 +343,41 @@ const handleRetry = () => {
   .translation-text {
     font-size: 14px;
   }
+}
+
+/* 复制成功 Toast */
+.copy-toast {
+  position: fixed;
+  bottom: 20px;
+  left: 50%;
+  transform: translateX(-50%);
+  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+  color: white;
+  font-size: 12px;
+  font-weight: 600;
+  padding: 6px 14px;
+  border-radius: 999px;
+  box-shadow: 0 2px 8px rgba(102, 126, 234, 0.35);
+  white-space: nowrap;
+  pointer-events: none;
+  z-index: 9999;
+}
+
+.toast-enter-active {
+  transition: all 0.3s ease;
+}
+
+.toast-leave-active {
+  transition: all 0.2s ease;
+}
+
+.toast-enter-from {
+  opacity: 0;
+  transform: translateX(-50%) translateY(10px);
+}
+
+.toast-leave-to {
+  opacity: 0;
+  transform: translateX(-50%) translateY(-4px);
 }
 </style>
