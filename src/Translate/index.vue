@@ -1,15 +1,16 @@
 <script lang="ts" setup>
-import { ref, watch, nextTick, onMounted } from 'vue'
+import { ref, watch, nextTick, onMounted, onUnmounted, computed } from 'vue'
+import { useRouter } from 'vue-router'
 import InputArea from './components/InputArea.vue'
 import ResultDisplay from './components/ResultDisplay.vue'
-import KeyboardShortcuts from './components/KeyboardShortcuts.vue'
-import SettingsPanel from './components/SettingsPanel.vue'
 import {
   buildChineseToEnglishPrompt,
   buildEnglishToChinesePrompt,
   buildPolishPrompt
 } from './prompts/index.js'
-import { loadSettings, saveSettings } from './utils/storage.js'
+import { useSettings } from './utils/useSettings.js'
+import { logger } from './utils/logger.js'
+import { recordEngineResult } from './utils/engineStats.js'
 
 const props = defineProps({
   enterAction: {
@@ -19,14 +20,8 @@ const props = defineProps({
 })
 
 // 设置状态
-const settings = ref({
-  showPhonetic: true,
-  showDefinitions: true,
-  showExamples: true,
-  showVariableNaming: true,
-  showContextNote: true,
-  detectionStrategy: 'regex',
-})
+const router = useRouter()
+const { settings, toggleSetting, updateSetting } = useSettings()
 
 // 核心状态
 const inputText = ref('')
@@ -37,18 +32,23 @@ const translationResult = ref(null)
 const isLoading = ref(false)
 const error = ref('')
 
+// 降级提示状态
+const fallbackNotice = ref('')
+let fallbackTimer = null
+// 本次成功翻译最终使用的引擎标识（如 'ai'/'deepl' 等），用于结果区显示，方便用户感知各引擎稳定性
+const usedEngine = ref('')
+// 翻译请求令牌：每次翻译自增，结果回填前校验是否仍是最新请求，丢弃旧慢请求的覆盖
+let translateRequestId = 0
+
 // 润色相关状态
 const isPolishing = ref(false)
 const polishedText = ref('')
 const originalText = ref('')
 
-// 配置面板状态
-const showSettingsPanel = ref(false)
-
 // 语言检测
 const detectLanguage = (text) => {
   if (!text || !text.trim()) return ''
-  const chineseChars = text.match(/[\u4e00-\u9fa5]/g)
+  const chineseChars = text.match(/[一-龥]/g)
   const chineseRatio = chineseChars ? chineseChars.length / text.length : 0
   return chineseRatio > 0.3 ? 'zh' : 'en'
 }
@@ -58,22 +58,42 @@ const detectLanguageByAI = async (text) => {
   const result = await window.utools.ai({
     messages: [{ role: 'user', content: `只回复 "zh" 或 "en"，检测以下文本的语言：\n${text.slice(0, 300)}` }]
   })
-  const content = result.content.trim().toLowerCase()
+  const content = (result && result.content && result.content.trim().toLowerCase()) || ''
   return content.includes('zh') ? 'zh' : 'en'
 }
 
 // 统一检测入口（AI 策略含 500ms 防抖）
 let detectionTimer = null
+// 检测版本号：每次发起检测自增，回调回填时校验版本是否最新，避免旧慢请求覆盖新结果
+let detectionVersion = 0
 const runDetection = (text) => {
   if (!text || !text.trim()) return
-  if (settings.value.detectionStrategy === 'ai') {
+  if (settings.detectionStrategy === 'ai') {
     clearTimeout(detectionTimer)
+    const myVersion = ++detectionVersion
     detectionTimer = setTimeout(async () => {
-      detectedLanguage.value = await detectLanguageByAI(text)
+      try {
+        const lang = await detectLanguageByAI(text)
+        // 仅当本次仍是最新检测时回填，否则丢弃（防止旧慢请求覆盖新结果）
+        if (myVersion === detectionVersion) {
+          detectedLanguage.value = lang
+        }
+      } catch (err) {
+        console.warn('AI 语言检测失败:', err && err.message)
+      }
     }, 500)
   } else {
     detectedLanguage.value = detectLanguage(text)
   }
+}
+
+// 取消挂起的检测定时器与 inflight AI 检测（版本号失效后回调自动丢弃）
+const cancelDetection = () => {
+  if (detectionTimer) {
+    clearTimeout(detectionTimer)
+    detectionTimer = null
+  }
+  detectionVersion++ // 让任何 inflight AI 检测回调失效
 }
 
 // 手动切换语言方向
@@ -85,6 +105,7 @@ const handleLanguageToggle = () => {
 // 右键重新自动识别
 const handleLanguageRedetect = () => {
   isManualOverride.value = false
+  cancelDetection()
   runDetection(inputText.value)
 }
 
@@ -95,7 +116,7 @@ const detectInputType = (text) => {
   const trimmed = text.trim()
 
   // 检测中文
-  const chineseChars = trimmed.match(/[\u4e00-\u9fa5]/g)
+  const chineseChars = trimmed.match(/[一-龥]/g)
   const isChinese = chineseChars && chineseChars.length / trimmed.length > 0.3
 
   if (isChinese) {
@@ -118,63 +139,266 @@ const detectInputType = (text) => {
 
 // 解析 AI 响应
 const parseResult = (aiResponse, type) => {
-  try {
-    // 尝试直接解析JSON
-    const result = JSON.parse(aiResponse)
-
-    // 句子模式只需验证 translation 字段
-    if (type === 'sentence') {
-      if (!result.translation) {
-        throw new Error('Invalid result structure')
-      }
-      return result
+  // 内部辅助：从字符串中尝试多种方式提取 JSON 对象
+  const tryExtractJson = (raw) => {
+    // 直接解析
+    try {
+      return JSON.parse(raw)
+    } catch (e) {
+      // 继续尝试其他方式
     }
-
-    // 单词/词组模式验证必需字段
-    if (!result.translation) {
-      throw new Error('Invalid result structure')
-    }
-
-    // 兼容旧格式和新格式
-    // 新格式: definitions 是对象数组 [{pos, meaning, example, exampleTranslation}]
-    // 旧格式: definitions 是字符串数组，examples 是字符串数组
-    if (result.definitions && result.definitions.length > 0) {
-      if (typeof result.definitions[0] === 'string') {
-        // 旧格式，保持原样
-        if (!Array.isArray(result.examples)) {
-          throw new Error('Invalid result structure')
-        }
-      }
-      // 新格式无需额外验证
-    }
-
-    return result
-  } catch (parseError) {
-    // 尝试提取JSON代码块
-    const jsonMatch = aiResponse.match(/```json\s*([\s\S]*?)\s*```/)
+    // 提取 ```json 代码块
+    const jsonMatch = raw.match(/```json\s*([\s\S]*?)\s*```/)
     if (jsonMatch) {
       try {
         return JSON.parse(jsonMatch[1])
       } catch (e) {
-        // 继续尝试其他方法
+        // 继续尝试其他方式
       }
     }
-
-    // 尝试提取花括号内容
-    const braceMatch = aiResponse.match(/\{[\s\S]*\}/)
+    // 提取花括号内容
+    const braceMatch = raw.match(/\{[\s\S]*\}/)
     if (braceMatch) {
       try {
         return JSON.parse(braceMatch[0])
       } catch (e) {
-        // 继续尝试其他方法
+        // 继续尝试其他方式
       }
     }
+    return null
+  }
 
-    throw new Error('无法解析翻译结果，请重试')
+  const result = tryExtractJson(aiResponse)
+
+  if (result && result.translation) {
+    // 句子模式只需 translation 字段
+    if (type === 'sentence') {
+      return result
+    }
+    // 单词/词组模式：兼容旧格式（definitions 字符串数组）
+    // 旧格式缺 examples 字段时补默认空数组，避免丢弃可渲染的翻译结果
+    if (result.definitions && result.definitions.length > 0 && typeof result.definitions[0] === 'string') {
+      if (!Array.isArray(result.examples)) {
+        result.examples = []
+      }
+    }
+    return result
+  }
+
+  // 三种 JSON 提取均失败：把原始内容当作纯文本译文降级返回（第三方模型可能不遵守 JSON 指令）
+  // 仅当内容非空时降级；空内容仍抛错（避免静默成功返回空译文）
+  const text = (aiResponse || '').trim()
+  if (text) {
+    // 清理可能的 markdown 代码块包裹
+    const cleaned = text.replace(/^```[\w]*\n/, '').replace(/\n```$/, '').trim()
+    if (cleaned) {
+      return { translation: cleaned }
+    }
+  }
+
+  throw new Error('无法解析翻译结果，请重试')
+}
+
+// 仅当译文为单个英文单词时才查词典；多词短语 dictionaryapi.dev 不收录会 404
+// 用于 zh→en 单词模式：译文可能是 "develop software" 这样的多词短语，强行查词典必然失败且浪费请求
+const lookupWordIfSingle = async (text) => {
+  const trimmed = (text || '').trim()
+  if (!trimmed || /\s+/.test(trimmed)) {
+    return { phonetic: '', definitions: [], examples: [] }
+  }
+  return window.services.lookupWord(trimmed)
+}
+
+const translateWithGoogle = async () => {
+  const lang = detectedLanguage.value || detectLanguage(inputText.value)
+  detectedLanguage.value = lang
+
+  const type = detectInputType(inputText.value)
+  inputType.value = type
+
+  if (!window.services || !window.services.googleTranslate) {
+    throw new Error('Google 翻译不可用，请切换至其他引擎')
+  }
+
+  const isEnToZh = lang === 'en'
+
+  if (type === 'sentence') {
+    const fromLang = isEnToZh ? 'en' : 'zh-CN'
+    const toLang = isEnToZh ? 'zh-CN' : 'en'
+    const translation = await window.services.googleTranslate(inputText.value.trim(), fromLang, toLang)
+    return { translation }
+  }
+
+  if (isEnToZh) {
+    const [translation, dict] = await Promise.all([
+      window.services.googleTranslate(inputText.value.trim(), 'en', 'zh-CN'),
+      window.services.lookupWord(inputText.value.trim()),
+    ])
+    return {
+      translation,
+      phonetic: dict.phonetic || '',
+      definitions: dict.definitions || [],
+      examples: dict.examples || [],
+    }
+  } else {
+    const translation = await window.services.googleTranslate(inputText.value.trim(), 'zh-CN', 'en')
+    const dict = await lookupWordIfSingle(translation)
+    return {
+      translation,
+      phonetic: dict.phonetic || '',
+      definitions: dict.definitions || [],
+      examples: dict.examples || [],
+    }
   }
 }
 
-// 翻译函数
+// 共享 helper：用任意字典类翻译函数（DeepL/DeepLX）执行翻译 + 词典查询
+// 这两个引擎的词典查询逻辑完全一致（en→zh 查原文，zh→en 查译文且仅单词），抽出来避免拆分后代码重复
+const translateWithDictEngine = async (translateFn) => {
+  const lang = detectedLanguage.value || detectLanguage(inputText.value)
+  detectedLanguage.value = lang
+
+  const type = detectInputType(inputText.value)
+  inputType.value = type
+
+  const isEnToZh = lang === 'en'
+
+  if (type === 'sentence') {
+    const fromLang = isEnToZh ? 'en' : 'zh-CN'
+    const toLang = isEnToZh ? 'zh-CN' : 'en'
+    const translation = await translateFn(inputText.value.trim(), fromLang, toLang)
+    return { translation }
+  }
+
+  if (isEnToZh) {
+    const [translation, dict] = await Promise.all([
+      translateFn(inputText.value.trim(), 'en', 'zh-CN'),
+      window.services.lookupWord(inputText.value.trim()),
+    ])
+    return {
+      translation,
+      phonetic: dict.phonetic || '',
+      definitions: dict.definitions || [],
+      examples: dict.examples || [],
+    }
+  } else {
+    const translation = await translateFn(inputText.value.trim(), 'zh-CN', 'en')
+    const dict = await lookupWordIfSingle(translation)
+    return {
+      translation,
+      phonetic: dict.phonetic || '',
+      definitions: dict.definitions || [],
+      examples: dict.examples || [],
+    }
+  }
+}
+
+// DeepL 官方 API 翻译（独立顶级引擎）
+const translateWithDeepL = async () => {
+  if (!window.services || !window.services.deeplTranslate) {
+    throw new Error('DeepL 官方 API 不可用')
+  }
+  return translateWithDictEngine(
+    (text, from, to) => window.services.deeplTranslate(text, from, to, settings.deeplApiKey)
+  )
+}
+
+// DeepLX 翻译（自部署/公共实例，独立顶级引擎）
+const translateWithDeepLX = async () => {
+  if (!window.services || !window.services.deeplxTranslate) {
+    throw new Error('DeepLX 不可用')
+  }
+  return translateWithDictEngine(
+    (text, from, to) => window.services.deeplxTranslate(text, from, to, settings.deeplxServerUrl, settings.deeplxToken)
+  )
+}
+
+// AI 翻译（语言检测、prompt 构建、utools.ai 调用、parseResult）
+const translateWithAI = async () => {
+  const lang = detectedLanguage.value || detectLanguage(inputText.value)
+  detectedLanguage.value = lang
+
+  const type = detectInputType(inputText.value)
+  inputType.value = type
+
+  const prompt = lang === 'zh'
+    ? buildChineseToEnglishPrompt(inputText.value, type)
+    : buildEnglishToChinesePrompt(inputText.value, type)
+
+  const result = await window.utools.ai({
+    messages: [{ role: 'user', content: prompt }]
+  })
+
+  // AI 翻译不调用词典查询，phonetic/definitions/examples 来自 parseResult
+  return parseResult(result.content, type)
+}
+
+// 自定义 AI 翻译（OpenAI 兼容协议，系统提示词追加到默认指令）
+const translateWithThirdpartyAI = async () => {
+  const { thirdpartyAiUrl, thirdpartyAiKey, thirdpartyAiModel, thirdpartyAiSystemPrompt } = settings
+  if (!thirdpartyAiUrl || !thirdpartyAiModel) {
+    throw new Error('自定义 AI 未配置完整（需填写 API 链接和模型名）')
+  }
+
+  const lang = detectedLanguage.value || detectLanguage(inputText.value)
+  detectedLanguage.value = lang
+
+  const type = detectInputType(inputText.value)
+  inputType.value = type
+
+  // 默认指令（user role，含 JSON 格式要求）
+  const userPrompt = lang === 'zh'
+    ? buildChineseToEnglishPrompt(inputText.value, type)
+    : buildEnglishToChinesePrompt(inputText.value, type)
+
+  // messages：system（用户自定义，追加）+ user（默认指令）
+  const messages = []
+  if (thirdpartyAiSystemPrompt && thirdpartyAiSystemPrompt.trim()) {
+    messages.push({ role: 'system', content: thirdpartyAiSystemPrompt })
+  }
+  messages.push({ role: 'user', content: userPrompt })
+
+  const data = await window.services.requestThirdpartyAI(
+    thirdpartyAiUrl,
+    thirdpartyAiKey,
+    { model: thirdpartyAiModel, messages, stream: false }
+  )
+
+  // OpenAI 兼容协议在鉴权失败/限流/模型不存在时返回 {error:{message,...}} 而非 choices
+  // 先检查 error 字段，抛出含真实信息的错误（而非笼统的"返回空结果"），便于诊断
+  if (data && data.error) {
+    const errMsg = (typeof data.error === 'object' && data.error.message) || JSON.stringify(data.error)
+    const err = new Error(`自定义 AI 错误: ${errMsg}`)
+    // postJson 此处未抛错（HTTP 200），手动补充请求上下文供日志诊断
+    err.request = {
+      method: 'POST',
+      url: thirdpartyAiUrl,
+      model: thirdpartyAiModel,
+      messages: messages.map(m => ({ role: m.role, content: m.content }))
+    }
+    err.response = data
+    throw err
+  }
+
+  const content = data?.choices?.[0]?.message?.content || ''
+  if (!content) throw new Error('自定义 AI 返回空结果')
+
+  // 复用 parseResult 解析（与 translateWithAI 一致）
+  return parseResult(content, type)
+}
+
+// 引擎调度函数
+const translateWithEngine = async (engine) => {
+  switch (engine) {
+    case 'google': return translateWithGoogle()
+    case 'deepl': return translateWithDeepL()
+    case 'deeplx': return translateWithDeepLX()
+    case 'thirdparty-ai': return translateWithThirdpartyAI()
+    case 'ai':
+    default: return translateWithAI()
+  }
+}
+
 const translate = async () => {
   if (!inputText.value || !inputText.value.trim()) {
     error.value = '请输入要翻译的内容'
@@ -189,31 +413,101 @@ const translate = async () => {
   isLoading.value = true
   error.value = ''
   translationResult.value = null
+  fallbackNotice.value = ''
+  usedEngine.value = ''
+  if (fallbackTimer) {
+    clearTimeout(fallbackTimer)
+    fallbackTimer = null
+  }
+  // 标记本次翻译请求；旧慢请求完成后若令牌已过期则丢弃结果
+  const myRequestId = ++translateRequestId
 
   try {
-    // 使用当前检测到的语言（可能是手动设置的）
-    const lang = detectedLanguage.value || detectLanguage(inputText.value)
-    detectedLanguage.value = lang
+    // 按 failoverOrder 顺序依次尝试引擎，首位是主引擎
+    const order = (settings.failoverOrder && Array.isArray(settings.failoverOrder) && settings.failoverOrder.length > 0)
+      ? settings.failoverOrder
+      : ['ai']
 
-    // 检测输入类型
-    const type = detectInputType(inputText.value)
-    inputType.value = type
+    const engineName = (e) => ({ ai: 'uTools AI', 'thirdparty-ai': '自定义 AI', google: 'Google 翻译', deepl: 'DeepL 官方', deeplx: 'DeepLX 自部署' })[e] || e
+    let lastErr = null
 
-    const prompt = lang === 'zh'
-      ? buildChineseToEnglishPrompt(inputText.value, type)
-      : buildEnglishToChinesePrompt(inputText.value, type)
-
-    const result = await window.utools.ai({
-      messages: [{ role: 'user', content: prompt }]
-    })
-
-    translationResult.value = parseResult(result.content, type)
+    for (let i = 0; i < order.length; i++) {
+      // 每个引擎尝试前再次校验，若已有更新请求发起则中止本次（避免并发翻译互相干扰）
+      if (myRequestId !== translateRequestId) {
+        return
+      }
+      const engine = order[i]
+      try {
+        logger.debug(engine, `尝试翻译（优先级 P${i + 1}）`, { text: inputText.value.trim().slice(0, 100) })
+        const result = await translateWithEngine(engine)
+        // 回填前校验令牌：若期间用户发起了新翻译或清空了输入，丢弃本次陈旧结果
+        if (myRequestId !== translateRequestId) {
+          return
+        }
+        translationResult.value = result
+        usedEngine.value = engine
+        logger.info(engine, '翻译成功')
+        recordEngineResult(engine, true)
+        // 非首个引擎成功时，显示降级提示
+        if (i > 0) {
+          fallbackNotice.value = `${engineName(order[0])} 不可用，已切换到 ${engineName(engine)}`
+          if (fallbackTimer) clearTimeout(fallbackTimer)
+          fallbackTimer = setTimeout(() => {
+            fallbackNotice.value = ''
+            fallbackTimer = null
+          }, 3000)
+        }
+        return
+      } catch (err) {
+        // 若期间已发起新请求，不再继续轮试旧请求
+        if (myRequestId !== translateRequestId) {
+          return
+        }
+        console.warn(`${engineName(engine)} 翻译失败:`, err.message)
+        // 失败时把实际请求/响应附入日志详情，便于诊断（HTTP 错误、鉴权失败、超时等）
+        const errDetail = { message: err.message, stack: err.stack || '' }
+        if (err.request) errDetail.request = err.request
+        if (err.response) errDetail.response = err.response
+        logger.error(engine, `${engineName(engine)} 翻译失败`, errDetail)
+        recordEngineResult(engine, false)
+        lastErr = err
+        // 继续尝试下一个引擎
+      }
+    }
+    // 全部失败
+    if (myRequestId !== translateRequestId) {
+      return
+    }
+    error.value = lastErr ? (lastErr.message || '翻译失败，请重试') : '翻译失败，请重试'
+    const allFailDetail = { text: inputText.value.trim().slice(0, 100), error: lastErr?.message || '' }
+    if (lastErr && lastErr.request) allFailDetail.request = lastErr.request
+    if (lastErr && lastErr.response) allFailDetail.response = lastErr.response
+    logger.error('system', '所有引擎均失败', allFailDetail)
   } catch (err) {
+    if (myRequestId !== translateRequestId) {
+      return
+    }
     console.error('Translation error:', err)
     error.value = err.message || '翻译失败，请重试'
+    const flowErrDetail = { message: err.message, stack: err.stack || '' }
+    if (err.request) flowErrDetail.request = err.request
+    if (err.response) flowErrDetail.response = err.response
+    logger.error('system', '翻译流程异常', flowErrDetail)
   } finally {
-    isLoading.value = false
+    // 仅当本次仍是最新请求时才解除 loading，避免新请求的 loading 被旧请求清掉
+    if (myRequestId === translateRequestId) {
+      isLoading.value = false
+    }
   }
+}
+
+// 关闭降级提示
+const dismissFallbackNotice = () => {
+  if (fallbackTimer) {
+    clearTimeout(fallbackTimer)
+    fallbackTimer = null
+  }
+  fallbackNotice.value = ''
 }
 
 // 润色函数
@@ -247,6 +541,7 @@ const polish = async () => {
     polishedText.value = polished
   } catch (err) {
     console.error('Polish error:', err)
+    logger.error('ai', '文本润色失败', { message: err.message, stack: err.stack || '' })
     error.value = err.message || '润色失败，请重试'
   } finally {
     isPolishing.value = false
@@ -258,6 +553,9 @@ const handleAcceptPolish = () => {
   inputText.value = polishedText.value
   polishedText.value = ''
   originalText.value = ''
+  // 重置手动覆盖锁：润色后文本可能语言不同，让自动检测重新接管，避免锁定在旧方向
+  isManualOverride.value = false
+  cancelDetection()
   // 更新语言检测
   detectedLanguage.value = detectLanguage(inputText.value)
 }
@@ -268,32 +566,75 @@ const handleRejectPolish = () => {
   originalText.value = ''
 }
 
-// 打开设置面板
+// 打开设置页面
 const openSettings = () => {
-  showSettingsPanel.value = true
-}
-
-// 保存设置
-const handleSaveSettings = (newSettings) => {
-  settings.value = { ...newSettings }
-  saveSettings(settings.value)
+  router.push({ name: 'settings' })
 }
 
 // 切换变量命名模式
 const toggleVariableNaming = () => {
-  settings.value = { ...settings.value, showVariableNaming: !settings.value.showVariableNaming }
-  saveSettings(settings.value)
+  toggleSetting('showVariableNaming')
+}
+
+// Footer 快捷切换可循环的引擎顺序（与 SettingsPage 拖拽可配置范围保持一致，含 5 引擎）
+const FOOTER_ENGINE_CYCLE = ['ai', 'thirdparty-ai', 'google', 'deepl', 'deeplx']
+
+const toggleTranslationEngine = () => {
+  const order = (settings.failoverOrder && settings.failoverOrder.length) ? [...settings.failoverOrder] : ['ai']
+  const current = order[0]
+  const nextIndex = (FOOTER_ENGINE_CYCLE.indexOf(current) + 1) % FOOTER_ENGINE_CYCLE.length
+  const next = FOOTER_ENGINE_CYCLE[nextIndex]
+  // 移除已存在的 next，再插入首位
+  const filtered = order.filter(e => e !== next)
+  const newOrder = [next, ...filtered]
+  updateSetting('failoverOrder', newOrder)
+}
+
+// 主引擎 → 简短标签（用于 footer 按钮显示文案，紧凑空间用缩短前缀）
+const mainEngineShortLabel = (main) => {
+  if (main === 'google') return 'Google'
+  if (main === 'deepl') return 'DeepL'
+  if (main === 'deeplx') return 'DeepLX'
+  if (main === 'thirdparty-ai') return '自定义'
+  return 'uTools'
+}
+
+// 本次成功翻译所用引擎的展示名（用于结果区小徽章，帮助用户判断各引擎可用性）
+const usedEngineLabel = computed(() => {
+  const e = usedEngine.value
+  if (!e) return ''
+  const names = { ai: 'uTools AI', 'thirdparty-ai': '自定义 AI', google: 'Google', deepl: 'DeepL', deeplx: 'DeepLX' }
+  return names[e] || e
+})
+
+const engineLabel = computed(() => {
+  const main = (settings.failoverOrder && settings.failoverOrder[0]) || 'ai'
+  if (main === 'google') return 'Google 翻译引擎模式'
+  if (main === 'deepl') return 'DeepL 翻译引擎模式'
+  if (main === 'deeplx') return 'DeepLX 翻译引擎模式'
+  if (main === 'thirdparty-ai') return '自定义 AI 翻译引擎模式'
+  return 'uTools AI 翻译引擎模式'
+})
+
+// 打开 GitHub 仓库
+const openGitHub = () => {
+  window.utools.shellOpenExternal('https://github.com/puppetdevz/dev-translation')
 }
 
 // 清空输入
 const handleClear = () => {
   inputText.value = ''
+  // 取消挂起的检测定时器与 inflight AI 检测，防止清空后回填 detectedLanguage
+  cancelDetection()
+  // 让进行中的翻译请求失效，防止其完成后回填已清空的 translationResult
+  translateRequestId++
   translationResult.value = null
   error.value = ''
   detectedLanguage.value = ''
   inputType.value = 'word'
   polishedText.value = ''
   originalText.value = ''
+  usedEngine.value = ''
 }
 
 // 重试
@@ -307,9 +648,12 @@ watch(inputText, (newValue) => {
     if (!isManualOverride.value) {
       runDetection(newValue)
     }
-    inputType.value = detectInputType(newValue)
+    // 注意：不在 watch 中提前 detectInputType —— 该值仅在 translate 时被消费（translateWithX 内部统一设置），
+    // 此处提前计算每次按键都同步跑多正则是浪费；ResultDisplay 也仅在 result 存在时才读取 inputType
   } else {
     // 输入为空时，重置所有状态
+    // 关键：清除挂起的检测定时器，否则 AI 策略下已 schedule 的 setTimeout 会在 500ms 后触发并回填 detectedLanguage
+    cancelDetection()
     isManualOverride.value = false
     detectedLanguage.value = ''
     inputType.value = 'word'
@@ -317,6 +661,7 @@ watch(inputText, (newValue) => {
     error.value = ''
     polishedText.value = ''
     originalText.value = ''
+    usedEngine.value = ''
   }
 })
 
@@ -328,9 +673,14 @@ watch(() => props.enterAction, (action) => {
   }
 }, { immediate: true })
 
-// 加载设置
-onMounted(() => {
-  settings.value = loadSettings()
+// 组件卸载时清理定时器，防止回调写入已销毁组件的 ref
+onUnmounted(() => {
+  cancelDetection()
+  if (fallbackTimer) {
+    clearTimeout(fallbackTimer)
+    fallbackTimer = null
+  }
+  translateRequestId++ // 让任何 inflight 翻译完成后丢弃结果
 })
 </script>
 
@@ -345,6 +695,7 @@ onMounted(() => {
           :isLoading="isLoading"
           :isPolishing="isPolishing"
           :polishedText="polishedText"
+          :usedEngineLabel="usedEngineLabel"
           @translate="translate"
           @clear="handleClear"
           @polish="polish"
@@ -356,6 +707,10 @@ onMounted(() => {
       </div>
 
       <div class="translate-result-section">
+        <div v-if="fallbackNotice" class="fallback-notice">
+          <span class="fallback-notice-text">{{ fallbackNotice }}</span>
+          <button class="fallback-notice-close" @click="dismissFallbackNotice" aria-label="关闭提示">×</button>
+        </div>
         <ResultDisplay
           :result="translationResult"
           :isLoading="isLoading"
@@ -370,28 +725,31 @@ onMounted(() => {
     </div>
 
     <div class="translate-footer">
-      <button
-        class="var-naming-btn"
-        :class="{ active: settings.showVariableNaming }"
-        @click="toggleVariableNaming"
-        title="编程变量命名模式"
-      >
-        <span>&lt;/&gt;</span>
-      </button>
+      <div class="footer-left">
+        <button
+          class="engine-toggle-btn"
+          :class="{ active: settings.failoverOrder && settings.failoverOrder[0] && settings.failoverOrder[0] !== 'ai' }"
+          @click="toggleTranslationEngine"
+          :aria-label="engineLabel"
+        >
+          <span>{{ mainEngineShortLabel((settings.failoverOrder && settings.failoverOrder[0]) || 'ai') }}</span>
+        </button>
+        <button
+          class="var-naming-btn"
+          :class="{ active: settings.showVariableNaming }"
+          @click="toggleVariableNaming"
+          aria-label="编程变量模式"
+        >
+          <span>&lt;/&gt;</span>
+        </button>
+      </div>
       <div class="footer-center">
-        <KeyboardShortcuts />
+        <a class="github-star-link" @click="openGitHub">⭐ 好用就 Star，不好用提 Issue</a>
       </div>
       <button class="settings-btn" @click="openSettings" title="设置">
         <span>⚙️</span>
       </button>
     </div>
-
-    <!-- 配置面板 -->
-    <SettingsPanel
-      v-model:visible="showSettingsPanel"
-      :settings="settings"
-      @save="handleSaveSettings"
-    />
   </div>
 </template>
 
@@ -476,7 +834,7 @@ onMounted(() => {
   backdrop-filter: blur(10px);
   border-top: 1px solid rgba(226, 232, 240, 0.6);
   display: grid;
-  grid-template-columns: 32px 1fr 32px;
+  grid-template-columns: auto 1fr 32px;
   align-items: center;
   gap: 8px;
   position: relative;
@@ -488,7 +846,22 @@ onMounted(() => {
   align-items: center;
 }
 
+.github-star-link {
+  font-size: 13px;
+  color: var(--text-secondary, #64748b);
+  text-decoration: none;
+  transition: all 0.2s;
+  cursor: pointer;
+  user-select: none;
+}
+
+.github-star-link:hover {
+  color: #6366f1;
+  transform: translateY(-1px);
+}
+
 .var-naming-btn {
+  position: relative;
   width: 32px;
   height: 32px;
   border: 1px solid rgba(226, 232, 240, 0.8);
@@ -521,7 +894,171 @@ onMounted(() => {
   box-shadow: 0 1px 3px rgba(99, 102, 241, 0.3);
 }
 
+.var-naming-btn::after,
+.engine-toggle-btn::after {
+  content: attr(aria-label);
+  position: absolute;
+  bottom: calc(100% + 8px);
+  left: 0;
+  transform: translateY(4px);
+  z-index: 20;
+  padding: 6px 8px;
+  border-radius: 6px;
+  background: rgba(15, 23, 42, 0.92);
+  color: white;
+  font-size: 12px;
+  font-weight: 600;
+  line-height: 1;
+  white-space: nowrap;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.16s ease, transform 0.16s ease;
+  box-shadow: 0 4px 12px rgba(15, 23, 42, 0.18);
+}
+
+.var-naming-btn::before,
+.engine-toggle-btn::before {
+  content: '';
+  position: absolute;
+  bottom: calc(100% + 3px);
+  left: 12px;
+  transform: translateY(4px) rotate(45deg);
+  z-index: 19;
+  width: 8px;
+  height: 8px;
+  background: rgba(15, 23, 42, 0.92);
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.16s ease, transform 0.16s ease;
+}
+
+.var-naming-btn:hover::after,
+.var-naming-btn:focus-visible::after,
+.engine-toggle-btn:hover::after,
+.engine-toggle-btn:focus-visible::after {
+  opacity: 1;
+  transform: translateY(0);
+}
+
+.var-naming-btn:hover::before,
+.var-naming-btn:focus-visible::before,
+.engine-toggle-btn:hover::before,
+.engine-toggle-btn:focus-visible::before {
+  opacity: 1;
+  transform: translateY(0) rotate(45deg);
+}
+
+.footer-left {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.engine-toggle-btn {
+  position: relative;
+  min-width: 62px;
+  height: 32px;
+  padding: 0 10px;
+  border: 1px solid rgba(226, 232, 240, 0.8);
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.9);
+  color: var(--text-secondary, #64748b);
+  cursor: pointer;
+  transition: all 0.2s;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 12px;
+  font-weight: 700;
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.03);
+}
+
+.engine-toggle-btn:hover {
+  background: white;
+  border-color: rgba(99, 102, 241, 0.4);
+  color: #6366f1;
+  transform: translateY(-1px);
+  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.04);
+}
+
+.engine-toggle-btn.active {
+  background: #6366f1;
+  border-color: #6366f1;
+  color: white;
+  box-shadow: 0 1px 3px rgba(99, 102, 241, 0.3);
+}
+
+/* 降级提示条 */
+.fallback-notice {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 8px 12px;
+  margin-bottom: 8px;
+  background: #fffbeb;
+  border: 1px solid rgba(251, 191, 36, 0.5);
+  border-radius: 10px;
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.03);
+  color: #92400e;
+  font-size: 12px;
+  line-height: 1.4;
+  animation: fallback-notice-fade-in 0.3s ease;
+}
+
+.fallback-notice-text {
+  flex: 1;
+  min-width: 0;
+}
+
+.fallback-notice-close {
+  flex: 0 0 auto;
+  width: 20px;
+  height: 20px;
+  border: none;
+  background: transparent;
+  color: #92400e;
+  font-size: 16px;
+  line-height: 1;
+  cursor: pointer;
+  border-radius: 4px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: background 0.2s;
+}
+
+.fallback-notice-close:hover {
+  background: rgba(251, 191, 36, 0.2);
+}
+
+@keyframes fallback-notice-fade-in {
+  from {
+    opacity: 0;
+    transform: translateY(-4px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
 @media (prefers-color-scheme: dark) {
+  .fallback-notice {
+    background: rgba(146, 64, 14, 0.2);
+    border-color: rgba(251, 191, 36, 0.3);
+    color: #fcd34d;
+    box-shadow: 0 1px 2px rgba(0, 0, 0, 0.2);
+  }
+
+  .fallback-notice-close {
+    color: #fcd34d;
+  }
+
+  .fallback-notice-close:hover {
+    background: rgba(251, 191, 36, 0.15);
+  }
+
   .translate-container {
     background: linear-gradient(135deg, #0f172a 0%, #1e293b 100%);
     color: var(--text-primary, #f1f5f9);
@@ -563,6 +1100,30 @@ onMounted(() => {
     color: white;
   }
 
+  .engine-toggle-btn {
+    background: rgba(30, 41, 59, 0.9);
+    border-color: rgba(51, 65, 85, 0.8);
+    color: var(--text-secondary, #94a3b8);
+    box-shadow: 0 1px 2px rgba(0, 0, 0, 0.2);
+  }
+
+  .engine-toggle-btn:hover {
+    background: #1e293b;
+    border-color: rgba(99, 102, 241, 0.5);
+    color: #a5b4fc;
+    box-shadow: 0 2px 4px rgba(0, 0, 0, 0.25);
+  }
+
+  .engine-toggle-btn.active {
+    background: #6366f1;
+    border-color: #6366f1;
+    color: white;
+  }
+
+  .github-star-link:hover {
+    color: #a5b4fc;
+  }
+
   .translate-result-section::-webkit-scrollbar-thumb {
     background: rgba(255, 255, 255, 0.2);
   }
@@ -591,7 +1152,6 @@ onMounted(() => {
     gap: 10px;
   }
 
-  /* 隐藏快捷键提示以节省空间 */
   .translate-footer {
     display: none;
   }

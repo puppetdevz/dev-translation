@@ -25,6 +25,10 @@ const props = defineProps({
   polishedText: {
     type: String,
     default: ''
+  },
+  usedEngineLabel: {
+    type: String,
+    default: ''
   }
 })
 
@@ -49,6 +53,8 @@ const languageIndicator = computed(() => {
   if (!props.detectedLanguage) return ''
   return props.detectedLanguage === 'zh' ? '中 → 英' : '英 → 中'
 })
+
+const isDetectingPlaceholder = computed(() => !props.detectedLanguage)
 
 const charCount = computed(() => {
   return props.modelValue.length
@@ -108,83 +114,91 @@ const handleKeydown = (event) => {
       </div>
     </div>
 
-    <!-- 普通输入框 -->
-    <textarea
-      v-else
-      ref="textareaRef"
-      v-model="text"
-      class="input-textarea"
-      placeholder="请输入要翻译的内容..."
-      maxlength="5000"
-      @keydown="handleKeydown"
-    />
-
-    <!-- 输入框下方的提示信息 -->
-    <div class="input-footer" v-if="!polishedText">
-      <div class="language-badge"
-        :class="{ 'manual-override': isManualOverride }"
-        v-if="languageIndicator"
-        @click="emit('languageToggle')"
-        @contextmenu.prevent="emit('languageRedetect')"
-        :title="isManualOverride ? '已手动设置\n左键: 切换方向 | 右键: 重新自动识别' : '左键: 切换方向 | 右键: 重新自动识别'"
-      >
-        <span class="badge-icon">{{ detectedLanguage === 'zh' ? '🇨🇳' : '🇺🇸' }}</span>
-        <span class="badge-text">{{ languageIndicator }}</span>
-        <span v-if="isManualOverride" class="badge-manual">🔒</span>
+    <!-- 普通输入框（含浮动底栏：语言徽章 + 字符数） -->
+    <div v-else class="input-field-wrapper">
+      <textarea
+        ref="textareaRef"
+        v-model="text"
+        class="input-textarea"
+        placeholder="请输入要翻译的内容..."
+        maxlength="5000"
+        @keydown="handleKeydown"
+      />
+      <div class="input-footer">
+        <div class="language-badge"
+          :class="{ 'manual-override': isManualOverride, 'language-badge-placeholder': isDetectingPlaceholder }"
+          @click="emit('languageToggle')"
+          @contextmenu.prevent="emit('languageRedetect')"
+          :title="isDetectingPlaceholder ? '左键: 设置为中文翻译 | 输入文字后将自动识别' : (isManualOverride ? '已手动设置\n左键: 切换方向 | 右键: 重新自动识别' : '左键: 切换方向 | 右键: 重新自动识别')"
+        >
+          <span class="badge-icon">{{ isDetectingPlaceholder ? '🌐' : (detectedLanguage === 'zh' ? '🇨🇳' : '🇺🇸') }}</span>
+          <span class="badge-text">{{ isDetectingPlaceholder ? '自动识别' : languageIndicator }}</span>
+          <span v-if="!isDetectingPlaceholder && isManualOverride" class="badge-manual">🔒</span>
+        </div>
+        <span class="char-count" :class="{ 'char-count-warning': charCount > 4500 }">
+          字符数: {{ charCount }}/5000
+        </span>
       </div>
-      <span class="char-count" :class="{ 'char-count-warning': charCount > 4500 }">
-        字符数: {{ charCount }}/5000
-      </span>
     </div>
 
+    <!-- 操作行：左侧引擎徽章 + 右侧按钮 -->
     <div class="input-actions">
-      <!-- 润色对比模式下的按钮 -->
-      <template v-if="polishedText">
-        <button
-          class="btn btn-reject"
-          @click="handleRejectPolish"
-        >
-          <span class="btn-icon">❌</span>
-          <span class="btn-text">拒绝</span>
-        </button>
-        <button
-          class="btn btn-accept"
-          @click="handleAcceptPolish"
-        >
-          <span class="btn-icon">✅</span>
-          <span class="btn-text">采纳</span>
-        </button>
-      </template>
+      <!-- 左侧：翻译引擎标识徽章（与按钮同行、同高） -->
+      <div v-if="usedEngineLabel" class="used-engine-badge" :title="`本次由 ${usedEngineLabel} 翻译`">
+        <span class="used-engine-badge-dot"></span>
+        <span class="used-engine-badge-text">由 {{ usedEngineLabel }} 翻译</span>
+      </div>
 
-      <!-- 普通模式下的按钮 -->
-      <template v-else>
-        <button
-          class="btn btn-clear"
-          @click="handleClear"
-          :disabled="!text"
-        >
-          <span class="btn-icon">🗑️</span>
-          <span class="btn-text">清空</span>
-        </button>
-        <button
-          class="btn btn-polish"
-          @click="handlePolish"
-          :disabled="!text || isLoading || isPolishing"
-        >
-          <span class="btn-icon" v-if="!isPolishing">✨</span>
-          <span class="btn-spinner" v-else></span>
-          <span class="btn-text">{{ isPolishing ? '润色中...' : '润色' }}</span>
-        </button>
-        <button
-          class="btn btn-translate"
-          @click="handleTranslate"
-          :disabled="!text || isLoading"
-        >
-          <span class="btn-icon" v-if="!isLoading">🌐</span>
-          <span class="btn-spinner" v-else></span>
-          <span class="btn-text">{{ isLoading ? '翻译中...' : '翻译' }}</span>
-        </button>
-      </template>
+      <!-- 右侧：操作按钮 -->
+      <div class="input-actions-btns">
+        <!-- 润色对比模式下的按钮 -->
+        <template v-if="polishedText">
+          <button
+            class="btn btn-reject"
+            @click="handleRejectPolish"
+          >
+            <span class="btn-icon">❌</span>
+            <span class="btn-text">拒绝</span>
+          </button>
+          <button
+            class="btn btn-accept"
+            @click="handleAcceptPolish"
+          >
+            <span class="btn-icon">✅</span>
+            <span class="btn-text">采纳</span>
+          </button>
+        </template>
+
+        <!-- 普通模式下的按钮 -->
+        <template v-else>
+          <button
+            class="btn btn-clear"
+            @click="handleClear"
+            :disabled="!text"
+          >
+            <span class="btn-icon">🗑️</span>
+            <span class="btn-text">清空</span>
+          </button>
+          <button
+            class="btn btn-polish"
+            @click="handlePolish"
+            :disabled="!text || isLoading || isPolishing"
+          >
+            <span class="btn-icon" v-if="!isPolishing">✨</span>
+            <span class="btn-spinner" v-else></span>
+            <span class="btn-text">{{ isPolishing ? '润色中...' : '润色' }}</span>
+          </button>
+          <button
+            class="btn btn-translate"
+            @click="handleTranslate"
+            :disabled="!text || isLoading"
+          >
+            <span class="btn-icon" v-if="!isLoading">🌐</span>
+            <span class="btn-spinner" v-else></span>
+            <span class="btn-text">{{ isLoading ? '翻译中...' : '翻译' }}</span>
+          </button>
+        </template>
+      </div>
     </div>
   </div>
 </template>
@@ -194,28 +208,32 @@ const handleKeydown = (event) => {
   display: flex;
   flex-direction: column;
   gap: 10px;
-  background: white;
-  border-radius: 12px;
-  padding: 14px;
-  border: 1px solid rgba(226, 232, 240, 0.8);
-  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.03);
-  transition: all 0.3s ease;
   box-sizing: border-box;
   max-width: 100%;
-  overflow: hidden;
   height: 100%;
 }
 
-.input-area:hover {
-  border-color: rgba(226, 232, 240, 1);
-  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.04);
+.input-field-wrapper {
+  position: relative;
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
 }
 
 .input-footer {
+  position: absolute;
+  bottom: 8px;
+  left: 12px;
+  right: 12px;
   display: flex;
   justify-content: space-between;
   align-items: center;
   gap: 8px;
+  pointer-events: none;
+  background: linear-gradient(to top, var(--input-footer-bg, #fafbfc) 65%, transparent);
+  padding: 8px 0 2px 0;
+  z-index: 1;
 }
 
 .language-badge {
@@ -232,6 +250,7 @@ const handleKeydown = (event) => {
   animation: fadeIn 0.3s ease;
   cursor: pointer;
   user-select: none;
+  pointer-events: auto;
   transition: opacity 0.2s, transform 0.2s;
 }
 
@@ -243,6 +262,19 @@ const handleKeydown = (event) => {
 .language-badge.manual-override {
   background: linear-gradient(135deg, #f59e0b 0%, #d97706 100%);
   box-shadow: 0 1px 3px rgba(245, 158, 11, 0.3);
+}
+
+.language-badge-placeholder {
+  background: #f1f5f9;
+  color: #94a3b8;
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.04);
+  font-weight: 500;
+  animation: none;
+}
+
+.language-badge-placeholder:hover {
+  background: #e2e8f0;
+  opacity: 1;
 }
 
 .badge-manual {
@@ -274,7 +306,7 @@ const handleKeydown = (event) => {
   width: 100%;
   flex: 1;
   min-height: 70px;
-  padding: 12px;
+  padding: 12px 12px 42px 12px;
   border: 1px solid rgba(226, 232, 240, 0.6);
   border-radius: 10px;
   background-color: #fafbfc;
@@ -397,26 +429,76 @@ const handleKeydown = (event) => {
   background: rgba(102, 126, 234, 0.5);
 }
 
+
 .input-actions {
   display: flex;
-  justify-content: flex-end;
-  gap: 8px;
+  align-items: flex-end;
+  gap: 10px;
+  flex-shrink: 0;
+}
+
+.input-actions-btns {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-left: auto;
+}
+
+/* 翻译引擎标识徽章（与操作按钮同行、同高） */
+.used-engine-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 10px;
+  background: rgba(99, 102, 241, 0.08);
+  border: 1px solid rgba(99, 102, 241, 0.2);
+  border-radius: 999px;
+  font-size: 11px;
+  font-weight: 600;
+  color: #6366f1;
+  line-height: 1.2;
+  flex-shrink: 0;
+  white-space: nowrap;
+  animation: used-engine-fade-in 0.3s ease;
+}
+
+.used-engine-badge-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: #6366f1;
+  flex-shrink: 0;
+}
+
+.used-engine-badge-text {
+  white-space: nowrap;
+}
+
+@keyframes used-engine-fade-in {
+  from {
+    opacity: 0;
+    transform: translateY(-2px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
 }
 
 .btn {
   display: flex;
   align-items: center;
-  gap: 4px;
-  padding: 6px 12px;
-  border: none;
-  border-radius: 6px;
-  font-size: 12px;
+  gap: 6px;
+  padding: 7px 16px;
+  border: 1px solid transparent;
+  border-radius: 10px;
+  font-size: 13px;
   font-weight: 600;
   cursor: pointer;
-  transition: all 0.2s ease;
+  transition: all 0.25s ease;
   position: relative;
   overflow: hidden;
-  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.05);
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.04);
 }
 
 .btn::before {
@@ -439,6 +521,7 @@ const handleKeydown = (event) => {
 
 .btn-icon {
   font-size: 13px;
+  transition: transform 0.2s ease;
 }
 
 .btn-text {
@@ -446,79 +529,86 @@ const handleKeydown = (event) => {
   z-index: 1;
 }
 
+.btn:hover:not(:disabled) .btn-icon {
+  transform: scale(1.15);
+}
+
 .btn-clear {
   background: #f1f5f9;
   color: #475569;
-  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.05);
+  border-color: rgba(226, 232, 240, 0.8);
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.04);
 }
 
 .btn-clear:hover:not(:disabled) {
   background: #e2e8f0;
+  border-color: rgba(203, 213, 225, 0.9);
   transform: translateY(-1px);
-  box-shadow: 0 2px 3px rgba(0, 0, 0, 0.08);
+  box-shadow: 0 2px 5px rgba(0, 0, 0, 0.07);
 }
 
 .btn-polish {
   background: #ec4899;
   color: white;
-  box-shadow: 0 1px 2px rgba(236, 72, 153, 0.3);
+  box-shadow: 0 1px 3px rgba(236, 72, 153, 0.25);
 }
 
 .btn-polish:hover:not(:disabled) {
   background: #db2777;
-  transform: translateY(-1px);
-  box-shadow: 0 2px 3px rgba(236, 72, 153, 0.4);
+  transform: translateY(-1.5px);
+  box-shadow: 0 4px 8px rgba(236, 72, 153, 0.35);
 }
 
 .btn-translate {
-  background: #6366f1;
+  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
   color: white;
-  box-shadow: 0 1px 2px rgba(99, 102, 241, 0.3);
+  box-shadow: 0 2px 4px rgba(102, 126, 234, 0.3);
 }
 
 .btn-translate:hover:not(:disabled) {
-  background: #4f46e5;
-  transform: translateY(-1px);
-  box-shadow: 0 2px 3px rgba(99, 102, 241, 0.4);
+  background: linear-gradient(135deg, #5a6fe0 0%, #6a4196 100%);
+  transform: translateY(-1.5px);
+  box-shadow: 0 4px 10px rgba(102, 126, 234, 0.4);
 }
 
 .btn-accept {
   background: #10b981;
   color: white;
-  box-shadow: 0 1px 2px rgba(16, 185, 129, 0.3);
+  box-shadow: 0 1px 3px rgba(16, 185, 129, 0.25);
 }
 
 .btn-accept:hover:not(:disabled) {
   background: #059669;
-  transform: translateY(-1px);
-  box-shadow: 0 2px 3px rgba(16, 185, 129, 0.4);
+  transform: translateY(-1.5px);
+  box-shadow: 0 4px 8px rgba(16, 185, 129, 0.35);
 }
 
 .btn-reject {
   background: #ef4444;
   color: white;
-  box-shadow: 0 1px 2px rgba(239, 68, 68, 0.3);
+  box-shadow: 0 1px 3px rgba(239, 68, 68, 0.25);
 }
 
 .btn-reject:hover:not(:disabled) {
   background: #dc2626;
-  transform: translateY(-1px);
-  box-shadow: 0 2px 3px rgba(239, 68, 68, 0.4);
+  transform: translateY(-1.5px);
+  box-shadow: 0 4px 8px rgba(239, 68, 68, 0.35);
 }
 
 .btn:disabled {
-  opacity: 0.5;
+  opacity: 0.45;
   cursor: not-allowed;
   transform: none !important;
+  box-shadow: none !important;
 }
 
 .btn-spinner {
-  width: 16px;
-  height: 16px;
-  border: 2px solid rgba(255, 255, 255, 0.3);
+  width: 18px;
+  height: 18px;
+  border: 2.5px solid rgba(255, 255, 255, 0.25);
   border-top-color: white;
   border-radius: 50%;
-  animation: spin 0.8s linear infinite;
+  animation: spin 0.7s linear infinite;
 }
 
 @keyframes spin {
@@ -539,17 +629,6 @@ const handleKeydown = (event) => {
 }
 
 @media (prefers-color-scheme: dark) {
-  .input-area {
-    background: #1e293b;
-    border-color: rgba(51, 65, 85, 0.8);
-    box-shadow: 0 1px 2px rgba(0, 0, 0, 0.2);
-  }
-
-  .input-area:hover {
-    border-color: rgba(51, 65, 85, 1);
-    box-shadow: 0 2px 4px rgba(0, 0, 0, 0.25);
-  }
-
   .input-textarea {
     background-color: #0f172a;
     color: var(--text-primary, #f1f5f9);
@@ -560,6 +639,10 @@ const handleKeydown = (event) => {
     background-color: #1e293b;
     border-color: rgba(102, 126, 234, 0.6);
     box-shadow: 0 0 0 3px rgba(102, 126, 234, 0.12);
+  }
+
+  .input-footer {
+    --input-footer-bg: #0f172a;
   }
 
   /* 深色模式输入框滚动条 */
@@ -596,20 +679,78 @@ const handleKeydown = (event) => {
   }
 
   .btn-clear {
-    background: #0f172a;
-    color: #f1f5f9;
+    background: #1e293b;
+    color: #e2e8f0;
+    border-color: rgba(51, 65, 85, 0.8);
     box-shadow: 0 1px 2px rgba(0, 0, 0, 0.3);
   }
 
   .btn-clear:hover:not(:disabled) {
-    background: #1e293b;
-    box-shadow: 0 2px 3px rgba(0, 0, 0, 0.4);
+    background: #334155;
+    border-color: rgba(71, 85, 105, 0.9);
+    box-shadow: 0 2px 4px rgba(0, 0, 0, 0.4);
+  }
+
+  .btn-polish {
+    box-shadow: 0 1px 3px rgba(236, 72, 153, 0.2);
+  }
+
+  .btn-polish:hover:not(:disabled) {
+    box-shadow: 0 4px 8px rgba(236, 72, 153, 0.3);
+  }
+
+  .btn-translate {
+    box-shadow: 0 2px 4px rgba(102, 126, 234, 0.25);
+  }
+
+  .btn-translate:hover:not(:disabled) {
+    box-shadow: 0 4px 10px rgba(102, 126, 234, 0.35);
+  }
+
+  .btn-accept {
+    box-shadow: 0 1px 3px rgba(16, 185, 129, 0.2);
+  }
+
+  .btn-accept:hover:not(:disabled) {
+    box-shadow: 0 4px 8px rgba(16, 185, 129, 0.3);
+  }
+
+  .btn-reject {
+    box-shadow: 0 1px 3px rgba(239, 68, 68, 0.2);
+  }
+
+  .btn-reject:hover:not(:disabled) {
+    box-shadow: 0 4px 8px rgba(239, 68, 68, 0.3);
+  }
+
+  .btn-spinner {
+    border-color: rgba(255, 255, 255, 0.2);
+    border-top-color: white;
+  }
+
+  .used-engine-badge {
+    background: rgba(99, 102, 241, 0.15);
+    border-color: rgba(99, 102, 241, 0.3);
+    color: #a5b4fc;
+  }
+
+  .used-engine-badge-dot {
+    background: #a5b4fc;
+  }
+
+  .language-badge-placeholder {
+    background: #334155;
+    color: #94a3b8;
+    box-shadow: 0 1px 2px rgba(0, 0, 0, 0.2);
+  }
+
+  .language-badge-placeholder:hover {
+    background: #475569;
   }
 }
 
 @media (max-width: 768px) {
   .input-area {
-    padding: 12px;
     gap: 10px;
   }
 
@@ -640,7 +781,7 @@ const handleKeydown = (event) => {
   }
 
   .btn {
-    padding: 6px 12px;
+    padding: 7px 14px;
     font-size: 12px;
   }
 
@@ -653,7 +794,6 @@ const handleKeydown = (event) => {
 /* 小窗口优化 */
 @media (max-height: 550px) {
   .input-area {
-    padding: 10px;
     gap: 8px;
   }
 
@@ -665,7 +805,7 @@ const handleKeydown = (event) => {
   }
 
   .btn {
-    padding: 5px 10px;
+    padding: 6px 12px;
     font-size: 11px;
   }
 

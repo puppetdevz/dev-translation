@@ -1,27 +1,24 @@
 <script lang="ts" setup>
-import { onMounted, ref } from 'vue';
-import Translate from './Translate/index.vue'
-import Settings from './Settings/index.vue'
+import { ref, onMounted } from 'vue'
+import { useRouter } from 'vue-router'
 
-const route = ref('')
+const router = useRouter()
 const enterAction = ref({})
 
 onMounted(() => {
+  if (!window.utools) return
+
   window.utools.onPluginEnter((action) => {
-    route.value = action.code
     enterAction.value = action
+    router.push({ name: action.code })
   })
-  window.utools.onPluginOut((isKill) => {
-    route.value = ''
+
+  window.utools.onPluginOut(() => {
+    enterAction.value = {}
   })
 })
 </script>
 
 <template>
-  <template v-if="route === 'translate'">
-    <Translate :enterAction="enterAction"></Translate>
-  </template>
-  <template v-else-if="route === 'settings'">
-    <Settings></Settings>
-  </template>
+  <router-view :enterAction="enterAction" />
 </template>

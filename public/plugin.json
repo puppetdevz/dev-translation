@@ -3,7 +3,7 @@
   "preload": "preload/services.js",
   "logo": "logo.png",
   "development": {
-    "main": "http://localhost:5173"
+    "main": "http://localhost:5175"
   },
   "features": [
     {
@@ -19,16 +19,6 @@
           "minLength": 1,
           "maxLength": 5000
         }
-      ]
-    },
-    {
-      "code": "settings",
-      "explain": "翻译输出设置 - 自定义显示内容",
-      "cmds": [
-        "设置",
-        "settings",
-        "shezhi",
-        "翻译设置"
       ]
     }
   ]
