@@ -32,6 +32,62 @@ const selectedEngine = ref((settings.failoverOrder && settings.failoverOrder[0])
 
 const selectEngine = (engine) => {
   selectedEngine.value = engine
+  testResult.value = null
+}
+
+// 引擎配置测试：用固定文本真实调用选中引擎，验证配置是否可用
+const TEST_TEXT = 'Hello World'
+const testingEngine = ref('')
+const testResult = ref(null)
+
+const runEngineTest = async (engine) => {
+  if (testingEngine.value) return
+  testingEngine.value = engine
+  testResult.value = null
+  try {
+    let result = ''
+    switch (engine) {
+      case 'ai': {
+        if (!window.utools || !window.utools.ai) throw new Error('uTools AI 不可用，请在 uTools 中配置 AI 服务')
+        const r = await window.utools.ai({
+          messages: [{ role: 'user', content: 'Translate the following text to Simplified Chinese and reply with the translation only:\n' + TEST_TEXT }]
+        })
+        result = (r && r.content && r.content.trim()) || ''
+        break
+      }
+      case 'thirdparty-ai': {
+        if (!settings.thirdpartyAiUrl || !settings.thirdpartyAiUrl.trim()) throw new Error('请先填写 API 链接')
+        if (!settings.thirdpartyAiModel || !settings.thirdpartyAiModel.trim()) throw new Error('请先填写模型名')
+        const data = await window.services.requestThirdpartyAI(
+          settings.thirdpartyAiUrl,
+          settings.thirdpartyAiKey,
+          { model: settings.thirdpartyAiModel, messages: [{ role: 'user', content: 'Translate the following text to Simplified Chinese and reply with the translation only:\n' + TEST_TEXT }], stream: false }
+        )
+        if (data && data.error) throw new Error((typeof data.error === 'object' && data.error.message) || JSON.stringify(data.error))
+        result = (data?.choices?.[0]?.message?.content || '').trim()
+        break
+      }
+      case 'google':
+        result = await window.services.googleTranslate(TEST_TEXT, 'en', 'zh-CN')
+        break
+      case 'deepl':
+        if (!settings.deeplApiKey || !settings.deeplApiKey.trim()) throw new Error('请先填写 DeepL API Key')
+        result = await window.services.deeplTranslate(TEST_TEXT, 'en', 'zh-CN', settings.deeplApiKey)
+        break
+      case 'deeplx':
+        if (!settings.deeplxServerUrl || !settings.deeplxServerUrl.trim()) throw new Error('请先填写 DeepLX 服务器地址')
+        result = await window.services.deeplxTranslate(TEST_TEXT, 'en', 'zh-CN', settings.deeplxServerUrl, settings.deeplxToken)
+        break
+      default:
+        throw new Error('未知引擎')
+    }
+    if (!result) throw new Error('引擎返回空结果')
+    testResult.value = { engine, ok: true, message: `连接正常：${result}` }
+  } catch (err) {
+    testResult.value = { engine, ok: false, message: err.message || '测试失败' }
+  } finally {
+    testingEngine.value = ''
+  }
 }
 
 const dragIndex = ref(null)
@@ -488,6 +544,37 @@ const handleRecentError = () => {
                   </div>
                 </template>
 
+                <div class="engine-test-block">
+                  <button
+                    class="engine-test-btn"
+                    :class="{ 'is-testing': testingEngine === selectedEngine }"
+                    :disabled="!!testingEngine"
+                    @click="runEngineTest(selectedEngine)"
+                  >
+                    <template v-if="testingEngine !== selectedEngine">
+                      <svg class="engine-test-btn-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M10 2v7.53a2 2 0 0 1-.21.9L4.72 20.55a1 1 0 0 0 .9 1.45h12.76a1 1 0 0 0 .9-1.45l-5.07-10.12A2 2 0 0 1 14 9.53V2"/><path d="M8.5 2h7"/><path d="M7 16h10"/></svg>
+                      <span>测试配置</span>
+                    </template>
+                    <template v-else>
+                      <span class="engine-test-spinner"></span>
+                      <span>测试中…</span>
+                    </template>
+                  </button>
+                  <Transition name="test-fade">
+                    <div
+                      v-if="testResult && testResult.engine === selectedEngine"
+                      class="engine-test-status"
+                      :class="testResult.ok ? 'test-ok' : 'test-fail'"
+                    >
+                      <span class="engine-test-icon">
+                        <svg v-if="testResult.ok" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5"/></svg>
+                        <svg v-else viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><path d="M18 6 6 18"/><path d="m6 6 12 12"/></svg>
+                      </span>
+                      <span class="engine-test-msg">{{ testResult.message }}</span>
+                    </div>
+                  </Transition>
+                </div>
+
                 <div class="config-divider"></div>
 
                 <!-- 输出设置：基于主引擎（failoverOrder[0]），不随选中引擎变化 -->
@@ -888,6 +975,171 @@ const handleRecentError = () => {
 
 .engine-no-config-icon {
   font-size: 16px;
+}
+
+/* 引擎配置测试 */
+.engine-test-block {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  margin-top: 12px;
+  flex-wrap: wrap;
+}
+
+.engine-test-btn {
+  flex-shrink: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  padding: 7px 14px;
+  background: #6366f1;
+  color: #ffffff;
+  border: none;
+  border-radius: 8px;
+  font-size: 12px;
+  font-weight: 600;
+  line-height: 1.4;
+  cursor: pointer;
+  min-width: 92px;
+  font-family: inherit;
+  box-shadow: 0 1px 2px rgba(99, 102, 241, 0.2);
+  transition: background 0.2s ease, box-shadow 0.2s ease, transform 0.15s ease, opacity 0.2s ease;
+}
+
+.engine-test-btn-icon {
+  width: 13px;
+  height: 13px;
+  display: block;
+  flex-shrink: 0;
+  transition: transform 0.25s ease;
+}
+
+.engine-test-btn:hover:not(:disabled) {
+  background: #4f46e5;
+  transform: translateY(-1px);
+  box-shadow: 0 3px 8px rgba(99, 102, 241, 0.3);
+}
+
+.engine-test-btn:hover:not(:disabled) .engine-test-btn-icon {
+  transform: rotate(-8deg);
+}
+
+.engine-test-btn:active:not(:disabled) {
+  transform: translateY(0) scale(0.97);
+  box-shadow: 0 1px 2px rgba(99, 102, 241, 0.2);
+}
+
+.engine-test-btn:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+
+/* 当前引擎测试中：保持实色按钮以展示 spinner */
+.engine-test-btn.is-testing:disabled {
+  opacity: 1;
+}
+
+/* 细环 spinner，替代原三圆点 */
+.engine-test-spinner {
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+  border: 2px solid rgba(255, 255, 255, 0.35);
+  border-top-color: #ffffff;
+  animation: engine-test-spin 0.7s linear infinite;
+  flex-shrink: 0;
+}
+
+@keyframes engine-test-spin {
+  to { transform: rotate(360deg); }
+}
+
+.engine-test-status {
+  flex: 1;
+  min-width: min(200px, 100%);
+  max-width: 100%;
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  padding: 7px 10px;
+  border-radius: 8px;
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+.engine-test-status.test-ok {
+  background: rgba(16, 185, 129, 0.08);
+  color: #059669;
+  border: 1px solid rgba(16, 185, 129, 0.22);
+}
+
+.engine-test-status.test-fail {
+  background: rgba(239, 68, 68, 0.06);
+  color: #dc2626;
+  border: 1px solid rgba(239, 68, 68, 0.22);
+}
+
+/* 圆形图标徽：彩色实底 + 白色符号 */
+.engine-test-icon {
+  flex-shrink: 0;
+  width: 16px;
+  height: 16px;
+  margin-top: 1px;
+  border-radius: 50%;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  color: #ffffff;
+}
+
+.engine-test-icon svg {
+  width: 9px;
+  height: 9px;
+  display: block;
+}
+
+.test-ok .engine-test-icon {
+  background: #10b981;
+  box-shadow: 0 1px 2px rgba(16, 185, 129, 0.35);
+}
+
+.test-fail .engine-test-icon {
+  background: #ef4444;
+  box-shadow: 0 1px 2px rgba(239, 68, 68, 0.35);
+}
+
+.engine-test-msg {
+  min-width: 0;
+  overflow-wrap: break-word;
+  word-break: break-word;
+}
+
+/* 状态条滑入淡入 + 图标徽弹入 */
+.test-fade-enter-active {
+  transition: opacity 0.25s ease, transform 0.25s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.test-fade-leave-active {
+  transition: opacity 0.15s ease, transform 0.15s ease;
+}
+
+.test-fade-enter-from {
+  opacity: 0;
+  transform: translateY(4px) scale(0.98);
+}
+
+.test-fade-leave-to {
+  opacity: 0;
+  transform: translateY(-2px);
+}
+
+.test-fade-enter-active .engine-test-icon {
+  transition: transform 0.3s cubic-bezier(0.34, 1.56, 0.64, 1) 0.08s;
+}
+
+.test-fade-enter-from .engine-test-icon {
+  transform: scale(0.3);
 }
 
 .config-divider {
@@ -1485,6 +1737,26 @@ const handleRecentError = () => {
     background: rgba(99, 102, 241, 0.1);
     border-color: rgba(99, 102, 241, 0.25);
     color: var(--text-secondary, #94a3b8);
+  }
+
+  .engine-test-btn {
+    box-shadow: 0 1px 2px rgba(0, 0, 0, 0.2);
+  }
+
+  .engine-test-btn:hover:not(:disabled) {
+    box-shadow: 0 3px 8px rgba(0, 0, 0, 0.3);
+  }
+
+  .engine-test-status.test-ok {
+    background: rgba(16, 185, 129, 0.12);
+    color: #34d399;
+    border-color: rgba(16, 185, 129, 0.28);
+  }
+
+  .engine-test-status.test-fail {
+    background: rgba(239, 68, 68, 0.1);
+    color: #f87171;
+    border-color: rgba(239, 68, 68, 0.28);
   }
 
   .config-divider {
