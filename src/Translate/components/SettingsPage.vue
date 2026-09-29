@@ -1049,6 +1049,45 @@ const handleRecentError = () => {
           <div class="engine-config-area">
             <Transition name="output-fade" mode="out-in">
               <div :key="selectedEngine" class="engine-config-content">
+                <div class="engine-config-header">
+                  <div class="engine-config-heading">
+                    <span v-if="engineMeta[selectedEngine].icon" class="engine-config-icon">{{ engineMeta[selectedEngine].icon }}</span>
+                    <span v-else class="brand-badge" :class="engineMeta[selectedEngine].brandClass">{{ engineMeta[selectedEngine].brand }}</span>
+                    <div class="engine-config-heading-text">
+                      <span class="engine-config-name">{{ engineMeta[selectedEngine].name }}</span>
+                      <span v-if="selectedEngine === 'ai'" class="engine-config-subtitle">无需额外配置</span>
+                    </div>
+                  </div>
+                  <button
+                    class="engine-test-btn"
+                    :class="{ 'is-testing': testingEngine === selectedEngine }"
+                    :disabled="!!testingEngine || !!testingGroupId"
+                    @click="runEngineTest(selectedEngine)"
+                  >
+                    <template v-if="testingEngine !== selectedEngine">
+                      <svg class="engine-test-btn-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M10 2v7.53a2 2 0 0 1-.21.9L4.72 20.55a1 1 0 0 0 .9 1.45h12.76a1 1 0 0 0 .9-1.45l-5.07-10.12A2 2 0 0 1 14 9.53V2"/><path d="M8.5 2h7"/><path d="M7 16h10"/></svg>
+                      <span>测试配置</span>
+                    </template>
+                    <template v-else>
+                      <span class="engine-test-spinner"></span>
+                      <span>测试中…</span>
+                    </template>
+                  </button>
+                </div>
+                <div v-if="!officialEngineConfigured(selectedEngine)" class="engine-config-warning model-fetch-error">未配置完整凭据；该引擎会跳过，不发出翻译请求。</div>
+                <Transition name="test-fade">
+                  <div
+                    v-if="testResult && testResult.engine === selectedEngine"
+                    class="engine-test-status"
+                    :class="testResult.ok ? 'test-ok' : 'test-fail'"
+                  >
+                    <span class="engine-test-icon">
+                      <svg v-if="testResult.ok" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5"/></svg>
+                      <svg v-else viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><path d="M18 6 6 18"/><path d="m6 6 12 12"/></svg>
+                    </span>
+                    <span class="engine-test-msg">{{ testResult.message }}</span>
+                  </div>
+                </Transition>
                 <!-- 选中引擎的配置 -->
                 <template v-if="selectedEngine === 'deepl'">
                   <div class="deepl-config" style="margin-top: 0;">
@@ -1274,47 +1313,8 @@ const handleRecentError = () => {
                     <p class="deepl-config-hint">仅接受无用户名密码的 <code class="hint-code">http://</code> 或 <code class="hint-code">https://</code> CONNECT 代理，不支持 SOCKS5。启用后所有 Google 来源优先走该代理；代理故障时可能直连 Google。其他引擎和词典不使用此代理，也不会读取系统代理。</p>
                   </div>
                 </template>
-                <template v-else>
-                  <div class="engine-no-config">
-                    <span v-if="engineMeta[selectedEngine].icon" class="engine-no-config-icon">{{ engineMeta[selectedEngine].icon }}</span>
-                    <span v-else class="brand-badge" :class="engineMeta[selectedEngine].brandClass">{{ engineMeta[selectedEngine].brand }}</span>
-                    <span>{{ engineMeta[selectedEngine].name }} 无需额外配置</span>
-                  </div>
-                </template>
-
-                <div class="engine-test-block">
-                  <p v-if="!officialEngineConfigured(selectedEngine)" class="model-fetch-error">未配置完整凭据；该引擎会跳过，不发出翻译请求。</p>
-                  <button
-                    class="engine-test-btn"
-                    :class="{ 'is-testing': testingEngine === selectedEngine }"
-                    :disabled="!!testingEngine || !!testingGroupId"
-                    @click="runEngineTest(selectedEngine)"
-                  >
-                    <template v-if="testingEngine !== selectedEngine">
-                      <svg class="engine-test-btn-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M10 2v7.53a2 2 0 0 1-.21.9L4.72 20.55a1 1 0 0 0 .9 1.45h12.76a1 1 0 0 0 .9-1.45l-5.07-10.12A2 2 0 0 1 14 9.53V2"/><path d="M8.5 2h7"/><path d="M7 16h10"/></svg>
-                      <span>测试配置</span>
-                    </template>
-                    <template v-else>
-                      <span class="engine-test-spinner"></span>
-                      <span>测试中…</span>
-                    </template>
-                  </button>
-                  <Transition name="test-fade">
-                    <div
-                      v-if="testResult && testResult.engine === selectedEngine"
-                      class="engine-test-status"
-                      :class="testResult.ok ? 'test-ok' : 'test-fail'"
-                    >
-                      <span class="engine-test-icon">
-                        <svg v-if="testResult.ok" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5"/></svg>
-                        <svg v-else viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><path d="M18 6 6 18"/><path d="m6 6 12 12"/></svg>
-                      </span>
-                      <span class="engine-test-msg">{{ testResult.message }}</span>
-                    </div>
-                  </Transition>
-                  <p v-if="selectedEngine === 'thirdparty-ai'" class="deepl-config-hint" style="margin-top: 8px;">「测试配置」按组顺序测试整条组链，成功时指出实际命中的组；各组「测试」只测该组。真实请求可能消耗额度，不计入成功率、不改变顺序。</p>
-                  <p v-else-if="selectedEngine === 'google'" class="deepl-config-hint" style="margin-top: 8px;">测试配置与正式翻译使用同一代理规则，不计入成功率。</p>
-                </div>
+                <p v-if="selectedEngine === 'thirdparty-ai'" class="deepl-config-hint engine-test-note">「测试配置」按组顺序测试整条组链，成功时指出实际命中的组；各组「测试」只测该组。真实请求可能消耗额度，不计入成功率、不改变顺序。</p>
+                <p v-else-if="selectedEngine === 'google'" class="deepl-config-hint engine-test-note">测试配置与正式翻译使用同一代理规则，不计入成功率。</p>
               </div>
             </Transition>
           </div>
@@ -2026,54 +2026,76 @@ const handleRecentError = () => {
   min-width: 0;
 }
 
-.engine-config-content {
-  /* wrapper for config + outputs */
-}
-
-.engine-no-config {
+.engine-config-header {
   display: flex;
   align-items: center;
-  gap: 8px;
-  padding: 14px 16px;
-  background: rgba(99, 102, 241, 0.04);
-  border: 1px solid rgba(99, 102, 241, 0.15);
+  justify-content: space-between;
+  gap: 12px;
+  min-width: 0;
+  padding: 9px 12px;
+  margin-bottom: 12px;
+  background: rgba(248, 250, 252, 0.8);
+  border: 1px solid rgba(226, 232, 240, 0.6);
   border-radius: 10px;
-  font-size: 13px;
-  color: var(--text-secondary, #64748b);
 }
 
-.engine-no-config-icon {
-  font-size: 16px;
-}
-
-/* 引擎配置测试 */
-.engine-test-block {
+.engine-config-heading {
   display: flex;
-  align-items: flex-start;
+  align-items: center;
   gap: 10px;
-  margin-top: 12px;
-  flex-wrap: wrap;
+  min-width: 0;
 }
 
+.engine-config-icon {
+  font-size: 18px;
+  flex-shrink: 0;
+}
+
+.engine-config-heading-text {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  gap: 2px;
+}
+
+.engine-config-name {
+  color: var(--text-primary, #1e293b);
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.engine-config-subtitle {
+  color: var(--text-secondary, #64748b);
+  font-size: 12px;
+}
+
+.engine-config-warning {
+  margin: 0 0 10px;
+}
+
+.engine-test-note {
+  margin-top: 8px;
+}
+
+/* 引擎配置测试：与当前引擎标题并列，避免独立悬浮在配置下方 */
 .engine-test-btn {
   flex-shrink: 0;
   display: inline-flex;
   align-items: center;
   justify-content: center;
   gap: 6px;
-  padding: 7px 14px;
-  background: #6366f1;
-  color: #ffffff;
-  border: none;
+  padding: 6px 12px;
+  background: rgba(99, 102, 241, 0.06);
+  color: #4f46e5;
+  border: 1px solid rgba(99, 102, 241, 0.25);
   border-radius: 8px;
   font-size: 12px;
   font-weight: 600;
   line-height: 1.4;
   cursor: pointer;
-  min-width: 92px;
+  white-space: nowrap;
   font-family: inherit;
-  box-shadow: 0 1px 2px rgba(99, 102, 241, 0.2);
-  transition: background 0.2s ease, box-shadow 0.2s ease, transform 0.15s ease, opacity 0.2s ease;
+  transition: transform 0.15s ease, opacity 0.2s ease;
 }
 
 .engine-test-btn-icon {
@@ -2085,18 +2107,17 @@ const handleRecentError = () => {
 }
 
 .engine-test-btn:hover:not(:disabled) {
-  background: #4f46e5;
+  background: rgba(99, 102, 241, 0.12);
   transform: translateY(-1px);
-  box-shadow: 0 3px 8px rgba(99, 102, 241, 0.3);
 }
 
-.engine-test-btn:hover:not(:disabled) .engine-test-btn-icon {
-  transform: rotate(-8deg);
+.engine-test-btn:focus-visible {
+  outline: 2px solid #667eea;
+  outline-offset: 2px;
 }
 
 .engine-test-btn:active:not(:disabled) {
-  transform: translateY(0) scale(0.97);
-  box-shadow: 0 1px 2px rgba(99, 102, 241, 0.2);
+  transform: translateY(0);
 }
 
 .engine-test-btn:disabled {
@@ -2120,13 +2141,17 @@ const handleRecentError = () => {
   flex-shrink: 0;
 }
 
+.engine-test-btn .engine-test-spinner {
+  border-color: rgba(99, 102, 241, 0.25);
+  border-top-color: currentColor;
+}
+
 @keyframes engine-test-spin {
   to { transform: rotate(360deg); }
 }
 
 .engine-test-status {
-  flex: 1;
-  min-width: min(200px, 100%);
+  margin: 0 0 12px;
   max-width: 100%;
   display: flex;
   align-items: flex-start;
@@ -2973,18 +2998,24 @@ const handleRecentError = () => {
     color: var(--text-secondary, #64748b);
   }
 
-  .engine-no-config {
-    background: rgba(99, 102, 241, 0.1);
-    border-color: rgba(99, 102, 241, 0.25);
-    color: var(--text-secondary, #94a3b8);
+  .engine-config-header {
+    background: rgba(15, 23, 42, 0.6);
+    border-color: rgba(51, 65, 85, 0.6);
   }
 
   .engine-test-btn {
-    box-shadow: 0 1px 2px rgba(0, 0, 0, 0.2);
+    color: #c4b5fd;
+    background: rgba(99, 102, 241, 0.12);
+    border-color: rgba(129, 140, 248, 0.35);
   }
 
   .engine-test-btn:hover:not(:disabled) {
-    box-shadow: 0 3px 8px rgba(0, 0, 0, 0.3);
+    background: rgba(99, 102, 241, 0.2);
+  }
+
+  .engine-test-btn .engine-test-spinner {
+    border-color: rgba(196, 181, 253, 0.3);
+    border-top-color: currentColor;
   }
 
   .engine-test-status.test-ok {
@@ -3238,6 +3269,10 @@ const handleRecentError = () => {
     flex-direction: row;
     flex-wrap: wrap;
     gap: 6px;
+  }
+
+  .engine-config-area {
+    width: 100%;
   }
 
   .engine-card {
