@@ -173,8 +173,7 @@ const runEngineTest = async (engine) => {
         })
         if (chain && chain.success) {
           result = (chain.result && chain.result.translation) || ''
-          const hit = settingsSnap.thirdpartyAiGroups[chain.groupIndex]
-          successGroupName = (hit && hit.name) || `组 ${chain.groupIndex + 1}`
+          successGroupName = `组 ${chain.groupIndex + 1}`
           break
         }
         if (chain && chain.allSkipped) {
@@ -237,9 +236,9 @@ const runEngineTest = async (engine) => {
     testResult.value = {
       engine,
       ok: true,
-      message: ['baidu', 'aliyun', 'caiyun'].includes(engine)
-        ? '连接正常（已取得非空译文）'
-        : (successGroupName ? `连接正常（${successGroupName}）：${result}` : `连接正常：${result}`),
+      message: successGroupName
+        ? `连接正常（${successGroupName}，已取得非空译文）`
+        : '连接正常（已取得非空译文）',
     }
   } catch (err) {
     if (gen !== engineTestGen) return
@@ -452,6 +451,8 @@ const bumpGroupAsync = (id) => {
   const ui = ensureGroupUi(id)
   ui.fetchGen += 1
   ui.testGen += 1
+  // 旧请求在代际变化后不会进入 finally 清除 loading；允许立刻用新凭据重试。
+  ui.fetching = false
   ui.models = []
   ui.error = ''
   ui.testResult = null
@@ -611,8 +612,7 @@ const runGroupTest = async (groupId) => {
     const still = thirdpartyGroups.value.find(g => g.id === groupId)
     if (!still || still.url !== snap.url || still.apiKey !== snap.apiKey || still.model !== snap.model) return
     if (chain && chain.success) {
-      const text = (chain.result && chain.result.translation) || ''
-      ui.testResult = { ok: true, message: text ? `连接正常：${text}` : '连接正常' }
+      ui.testResult = { ok: true, message: '连接正常（已取得非空译文）' }
       return
     }
     const lastFail = [...((chain && chain.outcomes) || [])].reverse().find(o => o.status === 'failure' || o.status === 'skipped')
@@ -1538,7 +1538,7 @@ const handleRecentError = () => {
   color: var(--text-secondary, #64748b);
   text-align: left;
   cursor: pointer;
-  transition: background 0.2s, color 0.2s, border-color 0.2s, opacity 0.2s;
+  transition: opacity 0.2s;
 }
 
 .settings-nav-item:hover {

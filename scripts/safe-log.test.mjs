@@ -126,6 +126,24 @@ describe('sanitizeLogEntry', () => {
     assert.equal(line.includes('127.0.0.1'), false)
   })
 
+  it('旧日志的普通原始响应和伪装成引擎名或 ID 的秘密也不能进入日志', () => {
+    const marker = 'SECRET_CANARY'
+    const entry = sanitizeLogEntry({
+      id: `old-${marker}`,
+      timestamp: 3,
+      level: 'error',
+      engine: `https://proxy.example/${marker}`,
+      message: `DeepLX 翻译失败: ${marker}`,
+      category: 'http_error',
+      statusCode: 403,
+    })
+    const text = JSON.stringify(entry) + formatSafeLogLine(entry, 't', '错误')
+    assert.equal(text.includes(marker), false)
+    assert.equal(text.includes('proxy.example'), false)
+    assert.equal(entry.message, '引擎返回 HTTP 403')
+    assert.equal(entry.engine, 'system')
+  })
+
   it('含 TypeError / 堆栈的旧消息删除而非原样保留', () => {
     const entry = sanitizeLogEntry({
       id: '3',
@@ -165,6 +183,18 @@ describe('logger 读取时迁移旧记录', () => {
   beforeEach(() => {
     for (const k of Object.keys(store)) delete store[k]
     store['dev-translation-settings'] = JSON.stringify({ logLevel: 'error', logRetentionDays: 7 })
+  })
+
+  it('读取并迁移含无标记秘密的旧日志，存储与复制出口均不泄露', async () => {
+    store['dev-translation-logs'] = [{
+      id: 'old-SECRET_CANARY', timestamp: Date.now(), level: 'error',
+      engine: 'deeplx', message: 'DeepLX 翻译失败: SECRET_CANARY',
+      response: 'SECRET_CANARY',
+    }]
+    const { getLogs, formatLogsText } = await import('../src/Translate/utils/logger.js')
+    const logs = getLogs()
+    const blob = JSON.stringify(logs) + formatLogsText() + JSON.stringify(store['dev-translation-logs'])
+    assert.equal(blob.includes('SECRET_CANARY'), false)
   })
 
   it('getLogs / formatLogsText 不会泄露旧 detail', async () => {

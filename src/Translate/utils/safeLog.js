@@ -52,22 +52,14 @@ const ALLOWED_SKIP_REASON = {
   input_limit: true,
 }
 
-const SENSITIVE_RE = /sk-[a-zA-Z0-9]|Bearer\s+\S+|DeepL-Auth-Key|api[_-]?key|authorization|password|token=/i
-const URL_QUERY_RE = /https?:\/\/[^\s]+[?&]/i
-const JSONISH_RE = /[{[][\s\S]*[}\]]/
-const PROMPT_RE = /prompt|messages\s*[:=]|request body|response body|原文/i
-
-function isUnsafeMessage(msg) {
-  if (typeof msg !== 'string') return true
-  if (!msg) return false
-  if (msg.length > 180) return true
-  if (SENSITIVE_RE.test(msg)) return true
-  if (URL_QUERY_RE.test(msg)) return true
-  if (JSONISH_RE.test(msg)) return true
-  if (PROMPT_RE.test(msg)) return true
-  if (/at\s+\S+\s+\(/.test(msg) || /TypeError:/.test(msg) || /Cannot read properties/.test(msg)) return true
-  return false
-}
+// 历史 message / engine / id 都可能由旧调用方或服务端写入，不能靠关键词猜测是否安全。
+const ALLOWED_ENGINES = new Set([
+  'system', 'ai', 'thirdparty-ai', 'google', 'deepl', 'deeplx', 'baidu', 'aliyun', 'caiyun',
+])
+const SAFE_MESSAGES = new Set([
+  '翻译成功', '翻译服务未加载', '翻译流程异常', '所有引擎均失败',
+  'AI 语言检测失败', '文本润色失败',
+])
 
 function categoryFallbackMessage(category, statusCode) {
   if (category === 'status_524') return '上游返回 524（无响应体）'
@@ -133,7 +125,7 @@ export function sanitizeLogEntry(entry) {
   if (!entry || typeof entry !== 'object' || Array.isArray(entry)) return null
 
   const level = ALLOWED_LEVELS[entry.level] ? entry.level : 'error'
-  const engine = typeof entry.engine === 'string' && entry.engine ? entry.engine : 'system'
+  const engine = ALLOWED_ENGINES.has(entry.engine) ? entry.engine : 'system'
   const category = ALLOWED_CATEGORY[entry.category] ? entry.category : undefined
   const statusCode = pickFiniteStatus(entry.statusCode)
   const phase = ALLOWED_PHASE[entry.phase] ? entry.phase : undefined
@@ -153,15 +145,14 @@ export function sanitizeLogEntry(entry) {
   const durationMs = pickDurationMs(entry.durationMs)
   const googleAttempts = sanitizeGoogleAttempts(entry.googleAttempts)
 
-  let message = ''
-  if (typeof entry.message === 'string' && entry.message && !isUnsafeMessage(entry.message)) {
-    message = entry.message
-  } else {
-    message = categoryFallbackMessage(category, statusCode)
-  }
+  const message = SAFE_MESSAGES.has(entry.message)
+    ? entry.message
+    : categoryFallbackMessage(category, statusCode)
 
   const out = {
-    id: typeof entry.id === 'string' && entry.id ? entry.id : `${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
+    id: typeof entry.id === 'string' && /^\d+_[a-z0-9]{6,12}$/i.test(entry.id)
+      ? entry.id
+      : `${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
     timestamp: typeof entry.timestamp === 'number' && Number.isFinite(entry.timestamp) ? entry.timestamp : Date.now(),
     level,
     engine,
@@ -194,8 +185,8 @@ export function logsNeedMigration(rawLogs, sanitized) {
     const a = rawLogs[i]
     const b = sanitized[i]
     if (!a || typeof a !== 'object') return true
-    if (Object.prototype.hasOwnProperty.call(a, 'detail')) return true
-    if (a.message !== b.message || a.category !== b.category || a.statusCode !== b.statusCode) return true
+    if (Object.keys(a).some(key => !Object.prototype.hasOwnProperty.call(b, key))) return true
+    if (a.id !== b.id || a.message !== b.message || a.category !== b.category || a.statusCode !== b.statusCode) return true
     if (a.level !== b.level || a.engine !== b.engine) return true
   }
   return false
