@@ -253,6 +253,7 @@ const runEngineTest = async (engine) => {
 const probeGuard = createProbeRunGuard()
 const probeRunning = ref(false)
 const probeResults = ref(null)
+const probeDetailsOpen = ref(false)
 const probeSummary = ref('')
 const probeSummaryKind = ref('')
 let probeRunId = 0
@@ -294,6 +295,7 @@ const mergeProbeItem = (item) => {
 const runBatchProbe = async () => {
   if (!probeGuard.tryStart()) return
   probeRunning.value = true
+  probeDetailsOpen.value = true
   probeStale = false
   const runId = ++probeRunId
   probeSummary.value = '正在测试全部引擎…'
@@ -345,7 +347,10 @@ const runBatchProbe = async () => {
     probeSummaryKind.value = 'save_failed'
   } finally {
     probeGuard.end()
-    if (runId === probeRunId) probeRunning.value = false
+    if (runId === probeRunId) {
+      probeRunning.value = false
+      if (!probeLeftPage) probeDetailsOpen.value = false
+    }
   }
 }
 
@@ -982,18 +987,30 @@ const handleRecentError = () => {
             </button>
             <span class="probe-bar-hint">真实请求可能消耗额度；至少一个成功时按本轮速度自动重排并保存。</span>
           </div>
-          <div v-if="probeResults" class="probe-result-list">
-            <div
-              v-for="item in probeResults"
-              :key="item.engine"
-              class="probe-result-row"
-              :class="'probe-' + (item.status || 'pending')"
-            >
-              <span class="probe-result-name">{{ engineMeta[item.engine] ? engineMeta[item.engine].name : item.engine }}</span>
-              <span class="probe-result-text">{{ formatProbeItemText(item) }}</span>
-            </div>
-          </div>
           <p v-if="probeSummary" class="probe-summary" :class="'probe-summary-' + probeSummaryKind">{{ probeSummary }}</p>
+          <template v-if="probeResults">
+            <button
+              class="probe-details-toggle"
+              type="button"
+              aria-controls="probe-result-list"
+              :aria-expanded="probeDetailsOpen"
+              @click="probeDetailsOpen = !probeDetailsOpen"
+            >
+              <span>{{ probeDetailsOpen ? '收起测试明细' : '查看测试明细' }}（{{ probeResults.length }}）</span>
+              <svg class="probe-details-icon" :class="{ 'is-open': probeDetailsOpen }" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="6 9 12 15 18 9"/></svg>
+            </button>
+            <div v-show="probeDetailsOpen" id="probe-result-list" class="probe-result-list">
+              <div
+                v-for="item in probeResults"
+                :key="item.engine"
+                class="probe-result-row"
+                :class="'probe-' + (item.status || 'pending')"
+              >
+                <span class="probe-result-name">{{ engineMeta[item.engine] ? engineMeta[item.engine].name : item.engine }}</span>
+                <span class="probe-result-text">{{ formatProbeItemText(item) }}</span>
+              </div>
+            </div>
+          </template>
         </div>
         <div class="engine-layout">
           <!-- 左列：引擎列表（拖拽调序 + 点击选中） -->
@@ -1895,6 +1912,40 @@ const handleRecentError = () => {
   font-size: 12px;
   color: var(--text-secondary, #94a3b8);
   line-height: 1.4;
+}
+
+.probe-details-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  margin-top: 6px;
+  padding: 2px 0;
+  border: 0;
+  background: transparent;
+  color: var(--text-secondary, #64748b);
+  font: inherit;
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.probe-details-toggle:hover {
+  color: var(--text-primary, #1e293b);
+}
+
+.probe-details-toggle:focus-visible {
+  outline: 2px solid #667eea;
+  outline-offset: 2px;
+  border-radius: 2px;
+}
+
+.probe-details-icon {
+  width: 14px;
+  height: 14px;
+  transition: transform 0.15s ease;
+}
+
+.probe-details-icon.is-open {
+  transform: rotate(180deg);
 }
 
 .probe-result-list {
