@@ -406,7 +406,9 @@ const translateWithEngine = async (engine, timeoutMs, settingsSnap, requestId) =
 }
 
 const supplementDictionary = async ({ engine, result, requestId, sourceText, lang, type }) => {
-  if (!DICT_ENGINES[engine]) return
+  // AI 未按 JSON 返回时也可能只有译文；单词模式可用词典补足缺失的音标/释义。
+  if (!DICT_ENGINES[engine] && engine !== 'ai' && engine !== 'thirdparty-ai') return
+  if (result?.phonetic && Array.isArray(result.definitions) && result.definitions.length) return
   const word = wordLookupTarget({
     type,
     lang,
@@ -424,13 +426,13 @@ const supplementDictionary = async ({ engine, result, requestId, sourceText, lan
   })) return
   translationResult.value = {
     ...translationResult.value,
-    phonetic: dict.phonetic || translationResult.value.phonetic || '',
-    definitions: (dict.definitions && dict.definitions.length)
-      ? dict.definitions
-      : (translationResult.value.definitions || []),
-    examples: (dict.examples && dict.examples.length)
-      ? dict.examples
-      : (translationResult.value.examples || []),
+    phonetic: translationResult.value.phonetic || dict.phonetic || '',
+    definitions: (translationResult.value.definitions && translationResult.value.definitions.length)
+      ? translationResult.value.definitions
+      : (dict.definitions || []),
+    examples: (translationResult.value.examples && translationResult.value.examples.length)
+      ? translationResult.value.examples
+      : (dict.examples || []),
   }
 }
 

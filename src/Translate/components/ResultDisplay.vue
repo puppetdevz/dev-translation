@@ -1,6 +1,7 @@
 <script lang="ts" setup>
 import { computed } from 'vue'
 import WordResult from './WordResult.vue'
+import VariableNaming from './VariableNaming.vue'
 import { useCopyToast } from '../utils/useCopyToast.js'
 
 const props = defineProps({
@@ -87,8 +88,16 @@ const handleRetry = () => {
       <template v-else-if="result && inputType === 'sentence'">
         <div class="sentence-result">
           <div class="sentence-card">
-            <p class="translation-text" @click="copyWithToast(result.translation)">{{ result.translation }}</p>
+            <div class="sentence-content">
+              <p class="translation-text" @click="copyWithToast(result.translation)">{{ result.translation }}</p>
+              <span v-if="settings.showPhonetic && result.phonetic" class="sentence-phonetic">{{ result.phonetic }}</span>
+            </div>
           </div>
+          <VariableNaming
+            :englishText="detectedLanguage === 'zh' ? result.translation : originalText"
+            :enabled="settings.showVariableNaming"
+          />
+          <div v-if="settings.showContextNote && result.contextNote" class="sentence-context">{{ result.contextNote }}</div>
         </div>
 
         <!-- 复制成功提示 -->
@@ -221,7 +230,14 @@ const handleRetry = () => {
 /* 句子模式样式 */
 .sentence-result {
   width: 100%;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
 }
+
+.sentence-content { min-width: 0; }
+.sentence-phonetic { display: block; margin-top: 4px; font-size: 13px; color: #667eea; }
+.sentence-context { padding: 10px 12px; border: 1px solid rgba(226, 232, 240, 0.6); border-radius: 10px; background: white; font-size: 12px; color: var(--text-secondary, #64748b); }
 
 .sentence-card {
   display: flex;
@@ -283,6 +299,9 @@ const handleRetry = () => {
     border: none;
     box-shadow: none;
   }
+
+  .sentence-phonetic { color: #a5b4fc; }
+  .sentence-context { background: #0f172a; border-color: rgba(51, 65, 85, 0.6); color: var(--text-secondary, #94a3b8); }
 
   .sentence-card {
     background: #1e293b;
