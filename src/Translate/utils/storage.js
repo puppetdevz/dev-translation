@@ -134,10 +134,11 @@ export const loadSettings = () => {
  */
 export const saveSettings = (settings) => {
   try {
-    window.utools.dbStorage.setItem(STORAGE_KEY, JSON.stringify(settings))
-    return true
-  } catch (error) {
-    console.error('保存设置失败:', error)
+    // uTools 通常不返回状态；部分存储实现用 false 报告写入失败。
+    return window.utools.dbStorage.setItem(STORAGE_KEY, JSON.stringify(settings)) !== false
+  } catch {
+    // dbStorage 异常可能带入设置值或服务地址，日志只保留固定提示。
+    console.error('保存设置失败')
     return false
   }
 }

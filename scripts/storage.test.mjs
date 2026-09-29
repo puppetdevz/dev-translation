@@ -94,6 +94,33 @@ describe('loadSettings 超时字段', () => {
     }
   })
 
+  it('写入层明确返回 false 时不得报告保存成功', () => {
+    const original = window.utools.dbStorage.setItem
+    window.utools.dbStorage.setItem = () => false
+    try {
+      assert.equal(saveSettings({ ...DEFAULT_SETTINGS }), false)
+    } finally {
+      window.utools.dbStorage.setItem = original
+    }
+  })
+
+  it('写入抛错时不把敏感异常正文写进控制台', () => {
+    const originalSet = window.utools.dbStorage.setItem
+    const originalError = console.error
+    const logs = []
+    window.utools.dbStorage.setItem = () => { throw new Error('https://secret.example.com sk-token') }
+    console.error = (...args) => logs.push(args.join(' '))
+    try {
+      assert.equal(saveSettings({ ...DEFAULT_SETTINGS }), false)
+      assert.equal(logs.length, 1)
+      assert.equal(logs[0].includes('secret'), false)
+      assert.equal(logs[0].includes('sk-token'), false)
+    } finally {
+      window.utools.dbStorage.setItem = originalSet
+      console.error = originalError
+    }
+  })
+
   it('整个存储 JSON 损坏时回退默认设置', () => {
     store[STORAGE_KEY] = '{not-json'
     const s = loadSettings()

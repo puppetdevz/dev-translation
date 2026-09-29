@@ -20,7 +20,7 @@ export function useSettings() {
    */
   const updateSetting = (key, value) => {
     settings[key] = value
-    saveSettings({ ...settings })
+    return saveSettings({ ...settings })
   }
 
   /**

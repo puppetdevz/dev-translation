@@ -1,17 +1,30 @@
 <script setup>
-import { computed, ref, onMounted, nextTick } from 'vue'
+import { computed, ref, onMounted, onUnmounted, watch, nextTick } from 'vue'
 import { useRouter } from 'vue-router'
 import { useSettings } from '../utils/useSettings.js'
 import { copyText } from '../utils/clipboard.js'
 import { getLogs, clearLogs, getLogCount, formatLogsText } from '../utils/logger.js'
 import { LOG_LEVEL_OPTIONS, LOG_RETENTION_OPTIONS, levelLabel } from '../utils/logConstants.js'
 import { getEngineStats, clearEngineStats, computeStability, ENGINE_STATS_RECENT_WINDOW } from '../utils/engineStats.js'
-import { inspectEngine, classifyError, skipUserMessage } from '../utils/engineBridge.js'
+import { inspectEngine, classifyError, skipUserMessage, getRuntimeEnv } from '../utils/engineBridge.js'
 import {
   normalizeEngineResponseTimeoutSeconds,
   ENGINE_RESPONSE_TIMEOUT_MIN,
   ENGINE_RESPONSE_TIMEOUT_MAX,
+  snapshotEngineTimeoutMs,
 } from '../utils/storage.js'
+import {
+  createProbeText,
+  inspectProbeEngines,
+  runBatchEngineProbe,
+  snapshotProbeConfig,
+  isProbeConfigUnchanged,
+  applyProbeOrder,
+  createProbeRunGuard,
+  formatProbeItemText,
+  PROBE_NO_SUCCESS_MESSAGE,
+  PROBE_APPLY,
+} from '../utils/engineProbe.js'
 
 const router = useRouter()
 const { settings, updateSetting, toggleSetting } = useSettings()
@@ -101,6 +114,104 @@ const runEngineTest = async (engine) => {
     testingEngine.value = ''
   }
 }
+
+const probeGuard = createProbeRunGuard()
+const probeRunning = ref(false)
+const probeResults = ref(null)
+const probeSummary = ref('')
+const probeSummaryKind = ref('')
+let probeRunId = 0
+let probeLeftPage = false
+let probeStale = false
+
+watch(
+  () => [
+    JSON.stringify(settings.failoverOrder || []),
+    settings.engineResponseTimeoutSeconds,
+    settings.deeplApiKey,
+    settings.deeplxServerUrl,
+    settings.deeplxToken,
+    settings.thirdpartyAiUrl,
+    settings.thirdpartyAiKey,
+    settings.thirdpartyAiModel,
+    settings.thirdpartyAiSystemPrompt,
+  ],
+  () => {
+    if (probeRunning.value) probeStale = true
+  },
+  { flush: 'sync' }
+)
+
+const mergeProbeItem = (item) => {
+  const list = probeResults.value ? [...probeResults.value] : []
+  const idx = list.findIndex(row => row.engine === item.engine)
+  if (idx >= 0) list[idx] = item
+  else list.push(item)
+  probeResults.value = list
+}
+
+const runBatchProbe = async () => {
+  if (!probeGuard.tryStart()) return
+  probeRunning.value = true
+  probeStale = false
+  const runId = ++probeRunId
+  probeSummary.value = '正在测试全部引擎…'
+  probeSummaryKind.value = 'running'
+  const env = getRuntimeEnv()
+  const config = snapshotProbeConfig(settings)
+  const timeoutMs = snapshotEngineTimeoutMs(config)
+  const text = createProbeText()
+  probeResults.value = inspectProbeEngines(config, env)
+  try {
+    const out = await runBatchEngineProbe({
+      settings: config,
+      env,
+      timeoutMs,
+      text,
+      onItem: (item) => {
+        if (runId !== probeRunId) return
+        mergeProbeItem(item)
+      },
+    })
+    if (runId !== probeRunId || probeLeftPage) return
+    probeResults.value = out.results
+    const stale = probeStale || !isProbeConfigUnchanged(config, settings)
+    probeRunning.value = false
+    const decision = applyProbeOrder({
+      hadSuccess: out.hadSuccess,
+      stale,
+      leftPage: probeLeftPage,
+      nextOrder: out.nextOrder,
+      persistOrder: (order) => updateSetting('failoverOrder', order),
+    })
+    if (!out.hadSuccess) {
+      probeSummary.value = PROBE_NO_SUCCESS_MESSAGE
+      probeSummaryKind.value = 'noop'
+    } else if (decision.reason === PROBE_APPLY.STALE) {
+      probeSummary.value = '测试完成，设置已变更，未调整顺序'
+      probeSummaryKind.value = 'stale'
+    } else if (decision.reason === PROBE_APPLY.SAVE_FAILED) {
+      probeSummary.value = '已按本轮速度重排，但保存失败'
+      probeSummaryKind.value = 'save_failed'
+    } else {
+      probeSummary.value = '已按本轮速度重排，最快引擎已设为主引擎'
+      probeSummaryKind.value = 'success'
+    }
+  } catch (err) {
+    if (runId !== probeRunId || probeLeftPage) return
+    const classified = classifyError(err)
+    probeSummary.value = classified.safeMessage || '测试失败'
+    probeSummaryKind.value = 'save_failed'
+  } finally {
+    probeGuard.end()
+    if (runId === probeRunId) probeRunning.value = false
+  }
+}
+
+onUnmounted(() => {
+  probeLeftPage = true
+  probeRunId += 1
+})
 
 const dragIndex = ref(null)
 const dragOverIndex = ref(null)
@@ -454,6 +565,39 @@ const handleRecentError = () => {
             @blur="commitEngineTimeout($event.target.value)"
             aria-label="翻译引擎响应超时（秒）"
           />
+        </div>
+        <div class="probe-bar">
+          <div class="probe-bar-row">
+            <button
+              class="probe-btn"
+              :class="{ 'is-testing': probeRunning }"
+              :disabled="probeRunning"
+              title="并行测试五个引擎，成功则按本轮耗时自动重排"
+              @click="runBatchProbe"
+            >
+              <template v-if="!probeRunning">
+                <svg class="probe-btn-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="23 4 23 10 17 10"/><polyline points="1 20 1 14 7 14"/><path d="M3.51 9a9 9 0 0 1 14.13-3.36L23 10"/><path d="M20.49 15a9 9 0 0 1-14.13 3.36L1 14"/></svg>
+                <span>一键测试并排序</span>
+              </template>
+              <template v-else>
+                <span class="engine-test-spinner"></span>
+                <span>测试中…</span>
+              </template>
+            </button>
+            <span class="probe-bar-hint">真实请求可能消耗额度；至少一个成功时按本轮速度自动重排并保存。</span>
+          </div>
+          <div v-if="probeResults" class="probe-result-list">
+            <div
+              v-for="item in probeResults"
+              :key="item.engine"
+              class="probe-result-row"
+              :class="'probe-' + (item.status || 'pending')"
+            >
+              <span class="probe-result-name">{{ engineMeta[item.engine] ? engineMeta[item.engine].name : item.engine }}</span>
+              <span class="probe-result-text">{{ formatProbeItemText(item) }}</span>
+            </div>
+          </div>
+          <p v-if="probeSummary" class="probe-summary" :class="'probe-summary-' + probeSummaryKind">{{ probeSummary }}</p>
         </div>
         <div class="engine-layout">
           <!-- 左列：引擎列表（拖拽调序 + 点击选中） -->
@@ -1043,6 +1187,148 @@ const handleRecentError = () => {
 
 .timeout-input:focus {
   border-color: rgba(99, 102, 241, 0.5);
+}
+
+.probe-bar {
+  margin-bottom: 12px;
+  padding: 10px 12px;
+  background: rgba(248, 250, 252, 0.8);
+  border: 1px solid rgba(226, 232, 240, 0.6);
+  border-radius: 10px;
+}
+
+.probe-bar-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.probe-btn {
+  flex-shrink: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  padding: 7px 14px;
+  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+  color: #ffffff;
+  border: none;
+  border-radius: 8px;
+  font-size: 12px;
+  font-weight: 600;
+  line-height: 1.4;
+  cursor: pointer;
+  font-family: inherit;
+  box-shadow: 0 1px 2px rgba(102, 126, 234, 0.25);
+  transition: transform 0.15s ease, opacity 0.2s ease;
+}
+
+.probe-btn-icon {
+  width: 13px;
+  height: 13px;
+  display: block;
+  flex-shrink: 0;
+}
+
+.probe-btn:hover:not(:disabled) {
+  transform: translateY(-1px);
+  box-shadow: 0 2px 4px rgba(102, 126, 234, 0.35);
+}
+
+.probe-btn:active:not(:disabled) {
+  transform: translateY(0);
+  box-shadow: 0 1px 2px rgba(102, 126, 234, 0.25);
+}
+
+.probe-btn:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+
+.probe-btn.is-testing:disabled {
+  opacity: 1;
+}
+
+.probe-bar-hint {
+  flex: 1;
+  min-width: 0;
+  font-size: 12px;
+  color: var(--text-secondary, #94a3b8);
+  line-height: 1.4;
+}
+
+.probe-result-list {
+  margin-top: 8px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.probe-result-row {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 4px 0;
+  font-size: 12px;
+  line-height: 1.4;
+  border-bottom: 1px solid rgba(226, 232, 240, 0.5);
+}
+
+.probe-result-row:last-child {
+  border-bottom: none;
+}
+
+.probe-result-name {
+  flex-shrink: 0;
+  font-weight: 600;
+  color: var(--text-primary, #1e293b);
+  min-width: 72px;
+}
+
+.probe-result-text {
+  flex: 1;
+  min-width: 0;
+  text-align: right;
+  overflow-wrap: break-word;
+  word-break: break-word;
+  color: var(--text-secondary, #64748b);
+}
+
+.probe-success .probe-result-text {
+  color: #059669;
+}
+
+.probe-failure .probe-result-text {
+  color: #dc2626;
+}
+
+.probe-skipped .probe-result-text,
+.probe-pending .probe-result-text {
+  color: var(--text-secondary, #64748b);
+}
+
+.probe-summary {
+  margin: 8px 0 0 0;
+  font-size: 12px;
+  font-weight: 600;
+  line-height: 1.4;
+  color: var(--text-secondary, #64748b);
+}
+
+.probe-summary-success {
+  color: #059669;
+}
+
+.probe-summary-noop,
+.probe-summary-stale,
+.probe-summary-running {
+  color: var(--text-secondary, #64748b);
+}
+
+.probe-summary-save_failed {
+  color: #dc2626;
 }
 
 .engine-config-area {
@@ -1867,9 +2153,28 @@ const handleRecentError = () => {
     color: var(--text-primary, #f1f5f9);
   }
 
-  .timeout-row {
+  .timeout-row,
+  .probe-bar {
     background: rgba(15, 23, 42, 0.6);
     border-color: rgba(51, 65, 85, 0.6);
+  }
+
+  .probe-result-row {
+    border-color: rgba(51, 65, 85, 0.6);
+  }
+
+  .probe-result-name {
+    color: var(--text-primary, #f1f5f9);
+  }
+
+  .probe-success .probe-result-text,
+  .probe-summary-success {
+    color: #34d399;
+  }
+
+  .probe-failure .probe-result-text,
+  .probe-summary-save_failed {
+    color: #f87171;
   }
 
   .timeout-row-label {
