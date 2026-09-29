@@ -52,6 +52,14 @@ export const PHASE = {
 
 export const EMPTY_DICT = { phonetic: '', definitions: [], examples: [] }
 
+export const DICT_ENGINES = {
+  google: true,
+  deepl: true,
+  deeplx: true,
+}
+
+const DEFAULT_ENGINE_TIMEOUT_MS = 5000
+
 export const SAFE_MESSAGES = {
   STATUS_524: '上游返回 524（无响应体）',
   BRIDGE_MISSING: '翻译服务未加载',
@@ -284,8 +292,62 @@ export function buildAllFailedMessage(outcomes) {
   return '所有引擎均不可用。请检查设置后重试。'
 }
 
+function resolveEngineTimeoutMs(timeoutMs) {
+  const n = Number(timeoutMs)
+  if (!Number.isFinite(n) || n <= 0) return DEFAULT_ENGINE_TIMEOUT_MS
+  return n
+}
+
+function hasUsableTranslation(result) {
+  return !!(result && typeof result === 'object' && typeof result.translation === 'string' && result.translation.trim())
+}
+
+/**
+ * 一次引擎尝试：调用 Promise 与截止计时器竞争，只结算一次。
+ * 迟到的 resolve/reject 被吞掉，避免重复统计与未处理拒绝。
+ */
+export function attemptEngineCall(translateWith, engine, timeoutMs) {
+  const budget = resolveEngineTimeoutMs(timeoutMs)
+  let settled = false
+  let timer = null
+  const callPromise = Promise.resolve().then(() => translateWith(engine))
+  callPromise.catch(() => {})
+
+  const wrapped = new Promise((resolve, reject) => {
+    timer = setTimeout(() => {
+      if (settled) return
+      settled = true
+      reject(new Error('引擎请求超时'))
+    }, budget)
+
+    callPromise.then(
+      (result) => {
+        if (settled) return
+        settled = true
+        clearTimeout(timer)
+        if (!hasUsableTranslation(result)) {
+          reject(new Error('引擎返回空结果'))
+          return
+        }
+        resolve(result)
+      },
+      (err) => {
+        if (settled) return
+        settled = true
+        clearTimeout(timer)
+        reject(err)
+      }
+    )
+  })
+
+  return wrapped.finally(() => {
+    if (timer) clearTimeout(timer)
+  })
+}
+
 /**
  * 按 failoverOrder 依次尝试。跳过不发请求；524 计为失败并立即尝试下一引擎。
+ * 每个已调用引擎有独立时限，超时视为真实失败且不重试同一引擎。
  * 请求令牌通过 isCurrent() 覆盖跳过、成功、失败与异步返回。
  */
 export async function runEngineFailover({
@@ -297,10 +359,12 @@ export async function runEngineFailover({
   onSkip,
   onFailure,
   onSuccess,
+  timeoutMs,
 }) {
   const outcomes = []
   const list = Array.isArray(order) && order.length > 0 ? order : ['ai']
   const runtime = env || getRuntimeEnv()
+  const budget = resolveEngineTimeoutMs(timeoutMs)
   let bridgeMissingNotified = false
 
   for (let i = 0; i < list.length; i++) {
@@ -318,7 +382,7 @@ export async function runEngineFailover({
     }
 
     try {
-      const result = await translateWith(engine)
+      const result = await attemptEngineCall(translateWith, engine, budget)
       if (typeof isCurrent === 'function' && !isCurrent()) {
         return { stale: true, outcomes }
       }
@@ -369,4 +433,42 @@ export async function safeLookupWord(word, env = getRuntimeEnv()) {
   } catch {
     return { ...EMPTY_DICT }
   }
+}
+
+/**
+ * 只取主译文。词典不得参与引擎级结算，避免慢查询拖垮超时与回退。
+ */
+export async function runMainTextTranslation(translateFn, text, from, to) {
+  const translation = await translateFn(text, from, to)
+  if (!translation || !String(translation).trim()) {
+    throw new Error('引擎返回空结果')
+  }
+  return { translation: String(translation) }
+}
+
+/** 单词模式的词典查询词：英译中查原文，中译英查译文；句子不查。 */
+export function wordLookupTarget({ type, lang, sourceText, translation }) {
+  if (type === 'sentence') return null
+  if (lang === 'en') {
+    const t = (sourceText || '').trim()
+    return t || null
+  }
+  const t = (translation || '').trim()
+  return t || null
+}
+
+/**
+ * 词典晚到补充：仅当仍是同一请求、同一成功引擎、同一主译文时才可合并。
+ */
+export function canApplyDictionarySupplement({
+  isCurrent,
+  engine,
+  usedEngine,
+  translation,
+  currentTranslation,
+}) {
+  if (typeof isCurrent === 'function' && !isCurrent()) return false
+  if (!engine || engine !== usedEngine) return false
+  if (!translation || translation !== currentTranslation) return false
+  return true
 }

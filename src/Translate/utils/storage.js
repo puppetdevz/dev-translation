@@ -5,8 +5,35 @@
 
 const STORAGE_KEY = 'dev-translation-settings'
 
+export const ENGINE_RESPONSE_TIMEOUT_MIN = 1
+export const ENGINE_RESPONSE_TIMEOUT_MAX = 60
+export const ENGINE_RESPONSE_TIMEOUT_DEFAULT = 5
+
+/**
+ * 翻译引擎响应超时（秒）：仅接受 1–60 的整数。
+ * 空值、小数、非数字、0、负数、越界一律回退默认 5 秒，避免无效值进入 timer。
+ */
+export function normalizeEngineResponseTimeoutSeconds(value) {
+  if (typeof value === 'string') {
+    const trimmed = value.trim()
+    if (!/^[+-]?\d+$/.test(trimmed)) return ENGINE_RESPONSE_TIMEOUT_DEFAULT
+    value = Number(trimmed)
+  }
+  if (typeof value !== 'number' || !Number.isInteger(value) || !Number.isFinite(value)) {
+    return ENGINE_RESPONSE_TIMEOUT_DEFAULT
+  }
+  if (value < ENGINE_RESPONSE_TIMEOUT_MIN || value > ENGINE_RESPONSE_TIMEOUT_MAX) {
+    return ENGINE_RESPONSE_TIMEOUT_DEFAULT
+  }
+  return value
+}
+
+export function snapshotEngineTimeoutMs(settings) {
+  return normalizeEngineResponseTimeoutSeconds(settings && settings.engineResponseTimeoutSeconds) * 1000
+}
+
 // 默认设置
-const DEFAULT_SETTINGS = {
+export const DEFAULT_SETTINGS = {
   showPhonetic: true,           // 显示音标
   showDefinitions: true,        // 显示释义
   showExamples: true,           // 显示例句
@@ -15,6 +42,7 @@ const DEFAULT_SETTINGS = {
   detectionStrategy: 'regex',   // 语言检测策略: 'regex' | 'ai'
   translationEngine: 'ai',     // 主翻译引擎（兼容旧版本，实际主引擎由 failoverOrder[0] 决定）
   failoverOrder: ['ai', 'thirdparty-ai', 'google', 'deepl', 'deeplx'], // 自动故障转移顺序: 所有引擎的有序列表，首位为主引擎，翻译失败时按此顺序依次重试。deepl=官方 API，deeplx=自部署/公共实例
+  engineResponseTimeoutSeconds: ENGINE_RESPONSE_TIMEOUT_DEFAULT, // 每个已调用翻译引擎取得主译文的时限（秒），超时视为失败并尝试下一引擎
   deeplApiKey: '',              // DeepL 官方 API Key（Free 版以 :fx 结尾，注册地址 https://www.deepl.com/pro-api）
   deeplxServerUrl: '',          // DeepLX 服务器地址（如 http://localhost:1188）
   deeplxToken: '',              // DeepLX 访问令牌（可选，自部署无 token 时留空）
@@ -88,6 +116,9 @@ export const loadSettings = () => {
       if (merged.failoverOrder.length === 0) {
         merged.failoverOrder = [...DEFAULT_SETTINGS.failoverOrder]
       }
+      merged.engineResponseTimeoutSeconds = normalizeEngineResponseTimeoutSeconds(
+        merged.engineResponseTimeoutSeconds
+      )
       return merged
     }
   } catch (error) {

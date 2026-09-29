@@ -6,7 +6,7 @@ uTools 插件「开发者翻译」：Vue 3 (Composition API) + Vite 6 + pnpm。�
 
 ```bash
 pnpm dev    # 开发服务器，端口 5175
-pnpm test   # 隔离用例（桥接跳过/524/日志脱敏/preload 初始化）
+pnpm test   # 隔离用例（桥接跳过/524/超时回退/日志脱敏/preload 初始化）
 pnpm build  # 构建到 dist/；会把 google-translate-api-x 解引用复制进 dist/preload/node_modules
 ```
 
@@ -17,10 +17,10 @@ pnpm build  # 构建到 dist/；会把 google-translate-api-x 解引用复制进
 
 - **所有联网翻译引擎都在 `public/preload/services.js`**（Node 上下文，绕过渲染进程 CORS 限制），通过 `window.services.*` 暴露：`googleTranslate`（三源轮换 + 24h LRU 缓存 + inflight 去重）、`deeplTranslate`、`deeplxTranslate`、`requestThirdpartyAI`、`fetchThirdpartyModels`、`lookupWord`（dictionaryapi.dev 词典）。只有 uTools AI 在渲染进程直接调 `window.utools.ai`。**新增网络请求一律加到 preload，不要在组件里 fetch。** `google-translate-api-x` 为可选源，顶层 `require` 失败不得阻断 `window.services` 赋值。
 - preload 是 CommonJS（`public/preload/package.json` 设了 `type: commonjs`，根包是 ESM）——保持 `require()`，勿改成 import。打包产物必须含 `dist/preload/node_modules/google-translate-api-x` 的**真实文件**（禁止残留 pnpm symlink）。
-- 引擎调度在 `src/Translate/utils/engineBridge.js`：未配置/缺方法为 `skipped`（不计成功率），真实调用失败才计 `failure`；524 立即回退下一引擎。词典查询失败不得推翻已成功主译文。
+- 引擎调度在 `src/Translate/utils/engineBridge.js`：未配置/缺方法为 `skipped`（不计成功率），真实调用失败才计 `failure`；524 立即回退下一引擎。每个已调用引擎受 `engineResponseTimeoutSeconds`（默认 5 秒，范围 1–60）约束，超时记为 `timeout` 失败并尝试下一引擎。词典查询失败不得推翻已成功主译文，也不占用该时限。
 - 路由：`src/router.js`（hash 模式），`/` 重定向到 `/translate`，另有 `/settings`。`App.vue` 监听 `utools.onPluginEnter`，用 `action.code` 作为路由名 push。新增功能 = plugin.json 加 feature（code）+ router 加同名路由。
 - 引擎故障转移：`src/Translate/index.vue` 按 `settings.failoverOrder` 顺序逐个尝试，**首位是主引擎**。合法引擎标识见 `utils/storage.js` 的 `KNOWN_ENGINES`（ai / thirdparty-ai / google / deepl / deeplx）。
-- 设置持久化：单个 dbStorage key `dev-translation-settings`，经 `utils/storage.js` + `utils/useSettings.js`（模块级 reactive 单例，跨组件共享）。`loadSettings` 内含旧配置迁移逻辑（failoverOrder 白名单过滤、deeplMode→deepl/deeplx 拆分），改动需谨慎；新增设置字段只需加 `DEFAULT_SETTINGS`。
+- 设置持久化：单个 dbStorage key `dev-translation-settings`，经 `utils/storage.js` + `utils/useSettings.js`（模块级 reactive 单例，跨组件共享）。`loadSettings` 内含旧配置迁移逻辑（failoverOrder 白名单过滤、deeplMode→deepl/deeplx 拆分、engineResponseTimeoutSeconds 规范化到 1–60 整数），改动需谨慎；新增设置字段只需加 `DEFAULT_SETTINGS`。
 - AI 提示词集中在 `src/Translate/prompts/`（中译英 / 英译中 / 润色，index.js 统一导出）。AI 返回的 JSON 需多层容错解析（直接 parse → 提取 markdown 代码块 → 提取花括号）。
 - 日志与统计：`utils/logger.js` + `utils/safeLog.js`（最少元数据白名单，读取时清理旧 detail）、`utils/engineStats.js`（成功/失败/跳过；跳过不进 total/recent）。
 

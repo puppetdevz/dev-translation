@@ -7,11 +7,29 @@ import {
   buildAllFailedMessage,
   skipUserMessage,
   safeLookupWord,
+  runMainTextTranslation,
+  wordLookupTarget,
+  canApplyDictionarySupplement,
   SKIP_REASON,
   SKIP_CATEGORY,
   ERROR_CATEGORY,
   EMPTY_DICT,
 } from '../src/Translate/utils/engineBridge.js'
+
+function hang() {
+  return new Promise(() => {})
+}
+
+function delay(ms) {
+  return new Promise(resolve => setTimeout(resolve, ms))
+}
+
+const CONFIGURED = {
+  deeplApiKey: 'k',
+  deeplxServerUrl: 'http://localhost:1188',
+  thirdpartyAiUrl: 'https://api.example.com/v1',
+  thirdpartyAiModel: 'm',
+}
 
 const PRELOAD_SERVICES = {
   googleTranslate: async () => 'ok',
@@ -85,6 +103,14 @@ describe('classifyError', () => {
     assert.equal(r.statusCode, 403)
     assert.equal(r.safeMessage, '引擎返回 HTTP 403')
     assert.equal(r.safeMessage.includes('secret-token'), false)
+  })
+
+  it('识别超时且安全消息不含 URL/正文', () => {
+    const r = classifyError(new Error('引擎请求超时 https://api.example.com/v1/chat?token=abc'))
+    assert.equal(r.category, ERROR_CATEGORY.TIMEOUT)
+    assert.equal(r.safeMessage, '引擎请求超时')
+    assert.equal(r.safeMessage.includes('https://'), false)
+    assert.equal(r.safeMessage.includes('token'), false)
   })
 })
 
@@ -225,5 +251,257 @@ describe('safeLookupWord', () => {
       services: { lookupWord: async () => { throw new Error('boom') } },
     })
     assert.deepEqual(r, EMPTY_DICT)
+  })
+})
+
+describe('runEngineFailover 引擎级超时', () => {
+  const env = { services: PRELOAD_SERVICES, utools: { ai: async () => ({}) } }
+
+  it('永不返回的主引擎在时限内超时并立即尝试下一引擎', async () => {
+    const calls = []
+    const failures = []
+    const t0 = Date.now()
+    const out = await runEngineFailover({
+      order: ['ai', 'google'],
+      settings: {},
+      env,
+      timeoutMs: 60,
+      translateWith: async (engine) => {
+        calls.push({ engine, at: Date.now() })
+        if (engine === 'ai') return hang()
+        return { translation: 'ok' }
+      },
+      isCurrent: () => true,
+      onFailure: (engine, classified) => failures.push({ engine, ...classified }),
+    })
+    const elapsed = Date.now() - t0
+    assert.deepEqual(calls.map(c => c.engine), ['ai', 'google'])
+    assert.ok(calls[1].at - calls[0].at >= 40)
+    assert.ok(elapsed < 400, `应立即回退，实际 ${elapsed}ms`)
+    assert.equal(out.success, true)
+    assert.equal(out.engine, 'google')
+    assert.equal(out.fallback, true)
+    assert.equal(failures.length, 1)
+    assert.equal(failures[0].engine, 'ai')
+    assert.equal(failures[0].category, ERROR_CATEGORY.TIMEOUT)
+  })
+
+  it('五种 ready 引擎永久挂起时各自超时且每个只计一次失败', async () => {
+    const engines = ['ai', 'thirdparty-ai', 'google', 'deepl', 'deeplx']
+    const calls = []
+    const failures = []
+    const t0 = Date.now()
+    const out = await runEngineFailover({
+      order: engines,
+      settings: CONFIGURED,
+      env,
+      timeoutMs: 40,
+      translateWith: async (engine) => {
+        calls.push(engine)
+        return hang()
+      },
+      isCurrent: () => true,
+      onFailure: (engine, classified) => failures.push({ engine, category: classified.category }),
+      onSkip: () => { throw new Error('ready 引擎不应跳过') },
+    })
+    const elapsed = Date.now() - t0
+    assert.deepEqual(calls, engines)
+    assert.equal(out.success, false)
+    assert.equal(failures.length, 5)
+    assert.ok(failures.every(f => f.category === ERROR_CATEGORY.TIMEOUT))
+    assert.ok(elapsed < 500, `五引擎串行超时过长: ${elapsed}ms`)
+    assert.ok(elapsed >= 150, `应消耗每引擎独立预算，实际 ${elapsed}ms`)
+    assert.equal(out.message.includes('TypeError'), false)
+    assert.equal(out.message.includes('https://'), false)
+  })
+
+  it('未配置/缺桥接仍跳过且不计失败，超时只发生在真实调用', async () => {
+    const calls = []
+    const skipped = []
+    const failures = []
+    const out = await runEngineFailover({
+      order: ['deepl', 'google'],
+      settings: { deeplApiKey: '' },
+      env,
+      timeoutMs: 40,
+      translateWith: async (engine) => {
+        calls.push(engine)
+        if (engine === 'google') return hang()
+        return { translation: 'should-not' }
+      },
+      isCurrent: () => true,
+      onSkip: (engine, inspection) => skipped.push({ engine, ...inspection }),
+      onFailure: (engine, classified) => failures.push({ engine, category: classified.category }),
+    })
+    assert.deepEqual(calls, ['google'])
+    assert.equal(skipped.length, 1)
+    assert.equal(skipped[0].skipReason, SKIP_REASON.NOT_CONFIGURED)
+    assert.equal(failures.length, 1)
+    assert.equal(failures[0].engine, 'google')
+    assert.equal(failures[0].category, ERROR_CATEGORY.TIMEOUT)
+    assert.equal(out.success, false)
+  })
+
+  it('第一个超时后第二个获得独立完整预算', async () => {
+    const started = {}
+    const failedAt = {}
+    await runEngineFailover({
+      order: ['ai', 'google'],
+      settings: {},
+      env,
+      timeoutMs: 70,
+      translateWith: async (engine) => {
+        started[engine] = Date.now()
+        return hang()
+      },
+      isCurrent: () => true,
+      onFailure: (engine) => { failedAt[engine] = Date.now() },
+    })
+    const firstBudget = failedAt.ai - started.ai
+    const secondBudget = failedAt.google - started.google
+    assert.ok(firstBudget >= 50 && firstBudget < 250, `第一引擎预算 ${firstBudget}`)
+    assert.ok(secondBudget >= 50 && secondBudget < 250, `第二引擎预算 ${secondBudget}`)
+    assert.ok(started.google - started.ai >= 50)
+  })
+
+  it('使用传入 timeoutMs 快照，不读取 settings 中途改值', async () => {
+    const settings = { engineResponseTimeoutSeconds: 60 }
+    const t0 = Date.now()
+    const pending = runEngineFailover({
+      order: ['ai'],
+      settings,
+      env,
+      timeoutMs: 50,
+      translateWith: async () => {
+        settings.engineResponseTimeoutSeconds = 60
+        return hang()
+      },
+      isCurrent: () => true,
+    })
+    const out = await pending
+    const elapsed = Date.now() - t0
+    assert.equal(out.success, false)
+    assert.equal(out.outcomes[0].category, ERROR_CATEGORY.TIMEOUT)
+    assert.ok(elapsed < 300, `应使用 50ms 快照而非 60s，实际 ${elapsed}ms`)
+  })
+
+  it('524 不等待配置时限就回退', async () => {
+    const t0 = Date.now()
+    const out = await runEngineFailover({
+      order: ['ai', 'google'],
+      settings: {},
+      env,
+      timeoutMs: 2000,
+      translateWith: async (engine) => {
+        if (engine === 'ai') {
+          const err = new Error('524 status code (no body)')
+          err.statusCode = 524
+          throw err
+        }
+        return { translation: 'ok' }
+      },
+      isCurrent: () => true,
+    })
+    const elapsed = Date.now() - t0
+    assert.equal(out.success, true)
+    assert.equal(out.engine, 'google')
+    assert.equal(out.outcomes[0].category, ERROR_CATEGORY.STATUS_524)
+    assert.ok(elapsed < 300, `524 应立即回退，实际 ${elapsed}ms`)
+  })
+
+  it('超时后迟到 resolve 不回填成功、不重复统计', async () => {
+    let resolveLate
+    const late = new Promise((resolve) => { resolveLate = resolve })
+    let successCount = 0
+    let failCount = 0
+    const out = await runEngineFailover({
+      order: ['google', 'ai'],
+      settings: {},
+      env,
+      timeoutMs: 40,
+      translateWith: async (engine) => {
+        if (engine === 'google') return late
+        return { translation: 'backup' }
+      },
+      isCurrent: () => true,
+      onSuccess: () => { successCount += 1 },
+      onFailure: () => { failCount += 1 },
+    })
+    resolveLate({ translation: 'late-primary' })
+    await delay(20)
+    assert.equal(out.success, true)
+    assert.equal(out.engine, 'ai')
+    assert.equal(successCount, 1)
+    assert.equal(failCount, 1)
+  })
+
+  it('超时后迟到 reject 不重复失败且无未处理拒绝', async () => {
+    let rejectLate
+    const late = new Promise((_, reject) => { rejectLate = reject })
+    const unhandled = []
+    const onUnhandled = (err) => { unhandled.push(err) }
+    process.on('unhandledRejection', onUnhandled)
+    try {
+      let failCount = 0
+      const out = await runEngineFailover({
+        order: ['google', 'ai'],
+        settings: {},
+        env,
+        timeoutMs: 40,
+        translateWith: async (engine) => {
+          if (engine === 'google') return late
+          return { translation: 'backup' }
+        },
+        isCurrent: () => true,
+        onFailure: () => { failCount += 1 },
+      })
+      rejectLate(new Error('late boom https://secret.example/token=abc'))
+      await delay(20)
+      assert.equal(out.success, true)
+      assert.equal(failCount, 1)
+      assert.equal(unhandled.length, 0)
+    } finally {
+      process.off('unhandledRejection', onUnhandled)
+    }
+  })
+})
+
+describe('主译文与词典解耦', () => {
+  it('runMainTextTranslation 不等待词典即可返回主译文', async () => {
+    const result = await runMainTextTranslation(
+      async () => 'hello',
+      'hi',
+      'en',
+      'zh-CN',
+    )
+    assert.equal(result.translation, 'hello')
+    assert.equal(result.phonetic, undefined)
+  })
+
+  it('空译文视为失败而不是成功', async () => {
+    await assert.rejects(
+      () => runMainTextTranslation(async () => '  ', 'hi', 'en', 'zh-CN'),
+      /空/
+    )
+  })
+
+  it('英译中查原文、中译英查译文、句子不查词典', () => {
+    assert.equal(wordLookupTarget({ type: 'word', lang: 'en', sourceText: 'hello', translation: '你好' }), 'hello')
+    assert.equal(wordLookupTarget({ type: 'word', lang: 'zh', sourceText: '你好', translation: 'hello' }), 'hello')
+    assert.equal(wordLookupTarget({ type: 'sentence', lang: 'en', sourceText: 'hello world', translation: '你好世界' }), null)
+  })
+
+  it('词典晚到：请求过期、引擎已变或译文已变则不合并', () => {
+    const base = {
+      engine: 'google',
+      usedEngine: 'google',
+      translation: '你好',
+      currentTranslation: '你好',
+      isCurrent: () => true,
+    }
+    assert.equal(canApplyDictionarySupplement(base), true)
+    assert.equal(canApplyDictionarySupplement({ ...base, isCurrent: () => false }), false)
+    assert.equal(canApplyDictionarySupplement({ ...base, usedEngine: 'deepl' }), false)
+    assert.equal(canApplyDictionarySupplement({ ...base, currentTranslation: '新译文' }), false)
   })
 })

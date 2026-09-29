@@ -9,12 +9,17 @@ import {
   buildPolishPrompt
 } from './prompts/index.js'
 import { useSettings } from './utils/useSettings.js'
+import { snapshotEngineTimeoutMs } from './utils/storage.js'
 import { logger } from './utils/logger.js'
 import { recordEngineResult, recordEngineSkip } from './utils/engineStats.js'
 import {
   runEngineFailover,
   safeLookupWord,
   engineDisplayName,
+  runMainTextTranslation,
+  wordLookupTarget,
+  canApplyDictionarySupplement,
+  DICT_ENGINES,
   SKIP_REASON,
   PHASE,
 } from './utils/engineBridge.js'
@@ -206,100 +211,46 @@ const parseResult = (aiResponse, type) => {
   throw new Error('无法解析翻译结果，请重试')
 }
 
-// 词典为可选能力：桥接缺失或查询失败时返回空音标/释义/例句，不把已成功的主译文误报为失败。
-const lookupWordIfSingle = (text) => safeLookupWord(text)
-
-const translateWithGoogle = async () => {
+const prepareTranslateDirection = () => {
   const lang = detectedLanguage.value || detectLanguage(inputText.value)
   detectedLanguage.value = lang
-
   const type = detectInputType(inputText.value)
   inputType.value = type
-
   const isEnToZh = lang === 'en'
-
-  if (type === 'sentence') {
-    const fromLang = isEnToZh ? 'en' : 'zh-CN'
-    const toLang = isEnToZh ? 'zh-CN' : 'en'
-    const translation = await window.services.googleTranslate(inputText.value.trim(), fromLang, toLang)
-    return { translation }
-  }
-
-  if (isEnToZh) {
-    const [translation, dict] = await Promise.all([
-      window.services.googleTranslate(inputText.value.trim(), 'en', 'zh-CN'),
-      lookupWordIfSingle(inputText.value.trim()),
-    ])
-    return {
-      translation,
-      phonetic: dict.phonetic || '',
-      definitions: dict.definitions || [],
-      examples: dict.examples || [],
-    }
-  } else {
-    const translation = await window.services.googleTranslate(inputText.value.trim(), 'zh-CN', 'en')
-    const dict = await lookupWordIfSingle(translation)
-    return {
-      translation,
-      phonetic: dict.phonetic || '',
-      definitions: dict.definitions || [],
-      examples: dict.examples || [],
-    }
+  return {
+    lang,
+    type,
+    fromLang: isEnToZh ? 'en' : 'zh-CN',
+    toLang: isEnToZh ? 'zh-CN' : 'en',
   }
 }
 
-// 共享 helper：用任意字典类翻译函数（DeepL/DeepLX）执行翻译 + 词典查询
-// 这两个引擎的词典查询逻辑完全一致（en→zh 查原文，zh→en 查译文且仅单词），抽出来避免拆分后代码重复
+const translateWithGoogle = async (timeoutMs) => {
+  const { fromLang, toLang } = prepareTranslateDirection()
+  return runMainTextTranslation(
+    (text, from, to) => window.services.googleTranslate(text, from, to, timeoutMs),
+    inputText.value.trim(),
+    fromLang,
+    toLang,
+  )
+}
+
 const translateWithDictEngine = async (translateFn) => {
-  const lang = detectedLanguage.value || detectLanguage(inputText.value)
-  detectedLanguage.value = lang
-
-  const type = detectInputType(inputText.value)
-  inputType.value = type
-
-  const isEnToZh = lang === 'en'
-
-  if (type === 'sentence') {
-    const fromLang = isEnToZh ? 'en' : 'zh-CN'
-    const toLang = isEnToZh ? 'zh-CN' : 'en'
-    const translation = await translateFn(inputText.value.trim(), fromLang, toLang)
-    return { translation }
-  }
-
-  if (isEnToZh) {
-    const [translation, dict] = await Promise.all([
-      translateFn(inputText.value.trim(), 'en', 'zh-CN'),
-      lookupWordIfSingle(inputText.value.trim()),
-    ])
-    return {
-      translation,
-      phonetic: dict.phonetic || '',
-      definitions: dict.definitions || [],
-      examples: dict.examples || [],
-    }
-  } else {
-    const translation = await translateFn(inputText.value.trim(), 'zh-CN', 'en')
-    const dict = await lookupWordIfSingle(translation)
-    return {
-      translation,
-      phonetic: dict.phonetic || '',
-      definitions: dict.definitions || [],
-      examples: dict.examples || [],
-    }
-  }
+  const { fromLang, toLang } = prepareTranslateDirection()
+  return runMainTextTranslation(translateFn, inputText.value.trim(), fromLang, toLang)
 }
 
 // DeepL 官方 API 翻译（独立顶级引擎）。桥接可用性由 inspectEngine 在调度前检查。
-const translateWithDeepL = async () => {
+const translateWithDeepL = async (timeoutMs) => {
   return translateWithDictEngine(
-    (text, from, to) => window.services.deeplTranslate(text, from, to, settings.deeplApiKey)
+    (text, from, to) => window.services.deeplTranslate(text, from, to, settings.deeplApiKey, timeoutMs)
   )
 }
 
 // DeepLX 翻译（自部署/公共实例，独立顶级引擎）
-const translateWithDeepLX = async () => {
+const translateWithDeepLX = async (timeoutMs) => {
   return translateWithDictEngine(
-    (text, from, to) => window.services.deeplxTranslate(text, from, to, settings.deeplxServerUrl, settings.deeplxToken)
+    (text, from, to) => window.services.deeplxTranslate(text, from, to, settings.deeplxServerUrl, settings.deeplxToken, timeoutMs)
   )
 }
 
@@ -324,7 +275,7 @@ const translateWithAI = async () => {
 }
 
 // 自定义 AI 翻译（OpenAI 兼容协议，系统提示词追加到默认指令）
-const translateWithThirdpartyAI = async () => {
+const translateWithThirdpartyAI = async (timeoutMs) => {
   const { thirdpartyAiUrl, thirdpartyAiKey, thirdpartyAiModel, thirdpartyAiSystemPrompt } = settings
 
   const lang = detectedLanguage.value || detectLanguage(inputText.value)
@@ -348,7 +299,8 @@ const translateWithThirdpartyAI = async () => {
   const data = await window.services.requestThirdpartyAI(
     thirdpartyAiUrl,
     thirdpartyAiKey,
-    { model: thirdpartyAiModel, messages, stream: false }
+    { model: thirdpartyAiModel, messages, stream: false },
+    timeoutMs,
   )
 
   if (data && data.error) {
@@ -363,14 +315,43 @@ const translateWithThirdpartyAI = async () => {
 }
 
 // 引擎调度函数
-const translateWithEngine = async (engine) => {
+const translateWithEngine = async (engine, timeoutMs) => {
   switch (engine) {
-    case 'google': return translateWithGoogle()
-    case 'deepl': return translateWithDeepL()
-    case 'deeplx': return translateWithDeepLX()
-    case 'thirdparty-ai': return translateWithThirdpartyAI()
+    case 'google': return translateWithGoogle(timeoutMs)
+    case 'deepl': return translateWithDeepL(timeoutMs)
+    case 'deeplx': return translateWithDeepLX(timeoutMs)
+    case 'thirdparty-ai': return translateWithThirdpartyAI(timeoutMs)
     case 'ai':
     default: return translateWithAI()
+  }
+}
+
+const supplementDictionary = async ({ engine, result, requestId, sourceText, lang, type }) => {
+  if (!DICT_ENGINES[engine]) return
+  const word = wordLookupTarget({
+    type,
+    lang,
+    sourceText,
+    translation: result && result.translation,
+  })
+  if (!word) return
+  const dict = await safeLookupWord(word)
+  if (!canApplyDictionarySupplement({
+    isCurrent: () => requestId === translateRequestId,
+    engine,
+    usedEngine: usedEngine.value,
+    translation: result && result.translation,
+    currentTranslation: translationResult.value && translationResult.value.translation,
+  })) return
+  translationResult.value = {
+    ...translationResult.value,
+    phonetic: dict.phonetic || translationResult.value.phonetic || '',
+    definitions: (dict.definitions && dict.definitions.length)
+      ? dict.definitions
+      : (translationResult.value.definitions || []),
+    examples: (dict.examples && dict.examples.length)
+      ? dict.examples
+      : (translationResult.value.examples || []),
   }
 }
 
@@ -401,11 +382,13 @@ const translate = async () => {
     const order = (settings.failoverOrder && Array.isArray(settings.failoverOrder) && settings.failoverOrder.length > 0)
       ? settings.failoverOrder
       : ['ai']
+    const timeoutMs = snapshotEngineTimeoutMs(settings)
 
     const outcome = await runEngineFailover({
       order,
       settings,
-      translateWith: translateWithEngine,
+      timeoutMs,
+      translateWith: (engine) => translateWithEngine(engine, timeoutMs),
       isCurrent: () => myRequestId === translateRequestId,
       onSkip: (engine, inspection, meta) => {
         recordEngineSkip(engine, inspection.skipCategory)
@@ -451,6 +434,14 @@ const translate = async () => {
             fallbackTimer = null
           }, 3000)
         }
+        void supplementDictionary({
+          engine,
+          result,
+          requestId: myRequestId,
+          sourceText: inputText.value.trim(),
+          lang: detectedLanguage.value,
+          type: inputType.value,
+        })
       },
     })
 

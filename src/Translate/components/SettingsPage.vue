@@ -7,6 +7,11 @@ import { getLogs, clearLogs, getLogCount, formatLogsText } from '../utils/logger
 import { LOG_LEVEL_OPTIONS, LOG_RETENTION_OPTIONS, levelLabel } from '../utils/logConstants.js'
 import { getEngineStats, clearEngineStats, computeStability, ENGINE_STATS_RECENT_WINDOW } from '../utils/engineStats.js'
 import { inspectEngine, classifyError, skipUserMessage } from '../utils/engineBridge.js'
+import {
+  normalizeEngineResponseTimeoutSeconds,
+  ENGINE_RESPONSE_TIMEOUT_MIN,
+  ENGINE_RESPONSE_TIMEOUT_MAX,
+} from '../utils/storage.js'
 
 const router = useRouter()
 const { settings, updateSetting, toggleSetting } = useSettings()
@@ -17,6 +22,11 @@ const handleBack = () => {
 
 const handleStrategySelect = (strategy) => {
   updateSetting('detectionStrategy', strategy)
+}
+
+const commitEngineTimeout = (raw) => {
+  const normalized = normalizeEngineResponseTimeoutSeconds(raw)
+  updateSetting('engineResponseTimeoutSeconds', normalized)
 }
 
 const engineMeta = {
@@ -428,6 +438,23 @@ const handleRecentError = () => {
       <div class="settings-section">
         <h3 class="section-title">翻译引擎配置</h3>
         <p class="section-hint">拖拽列表调整故障转移顺序（首位为主引擎），点击查看引擎配置。</p>
+        <div class="timeout-row">
+          <div class="timeout-row-info">
+            <span class="timeout-row-label">翻译引擎响应超时（秒）</span>
+            <span class="timeout-row-desc">每个已调用引擎在此时限内未取得主译文则视为失败并尝试下一个。默认 5 秒，范围 {{ ENGINE_RESPONSE_TIMEOUT_MIN }}–{{ ENGINE_RESPONSE_TIMEOUT_MAX }}。</span>
+          </div>
+          <input
+            class="timeout-input"
+            type="number"
+            :min="ENGINE_RESPONSE_TIMEOUT_MIN"
+            :max="ENGINE_RESPONSE_TIMEOUT_MAX"
+            step="1"
+            :value="settings.engineResponseTimeoutSeconds"
+            @change="commitEngineTimeout($event.target.value)"
+            @blur="commitEngineTimeout($event.target.value)"
+            aria-label="翻译引擎响应超时（秒）"
+          />
+        </div>
         <div class="engine-layout">
           <!-- 左列：引擎列表（拖拽调序 + 点击选中） -->
           <div class="engine-list">
@@ -963,6 +990,59 @@ const handleRecentError = () => {
   color: var(--text-secondary, #94a3b8);
   margin: -8px 0 12px 0;
   line-height: 1.4;
+}
+
+.timeout-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 10px 12px;
+  margin-bottom: 12px;
+  background: rgba(248, 250, 252, 0.8);
+  border: 1px solid rgba(226, 232, 240, 0.6);
+  border-radius: 10px;
+}
+
+.timeout-row-info {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.timeout-row-label {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text-primary, #1e293b);
+}
+
+.timeout-row-desc {
+  font-size: 12px;
+  color: var(--text-secondary, #94a3b8);
+  line-height: 1.4;
+}
+
+.timeout-input {
+  width: 72px;
+  flex-shrink: 0;
+  padding: 8px 10px;
+  border: 1px solid rgba(226, 232, 240, 0.8);
+  border-radius: 8px;
+  font-size: 13px;
+  font-weight: 600;
+  text-align: center;
+  background: white;
+  color: var(--text-primary, #1e293b);
+  outline: none;
+  box-sizing: border-box;
+  font-family: inherit;
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.03);
+}
+
+.timeout-input:focus {
+  border-color: rgba(99, 102, 241, 0.5);
 }
 
 .engine-config-area {
@@ -1785,6 +1865,26 @@ const handleRecentError = () => {
     background: rgba(30, 41, 59, 0.6);
     border-color: rgba(51, 65, 85, 0.6);
     color: var(--text-primary, #f1f5f9);
+  }
+
+  .timeout-row {
+    background: rgba(15, 23, 42, 0.6);
+    border-color: rgba(51, 65, 85, 0.6);
+  }
+
+  .timeout-row-label {
+    color: var(--text-primary, #f1f5f9);
+  }
+
+  .timeout-row-desc {
+    color: var(--text-secondary, #64748b);
+  }
+
+  .timeout-input {
+    background: rgba(30, 41, 59, 0.6);
+    border-color: rgba(51, 65, 85, 0.6);
+    color: var(--text-primary, #f1f5f9);
+    box-shadow: 0 1px 2px rgba(0, 0, 0, 0.2);
   }
 
   .thirdparty-ai-prompt {
