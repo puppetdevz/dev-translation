@@ -41,6 +41,32 @@ describe('设置页异步及测试结果回归', () => {
   })
 })
 
+describe('官方引擎开通入口', () => {
+  it('阿里云机器翻译链接应打开可用的官方产品页', () => {
+    const signup = between(settingsPage, 'const openAliyunSignup =', 'const openCaiyunSignup =')
+    assert.match(settingsPage, /@click="openAliyunSignup">开通阿里云机器翻译<\/a>/)
+    let openedUrl = ''
+    const open = runInNewContext(`(() => { ${signup}; return openAliyunSignup })()`, {
+      window: { utools: { shellOpenExternal: url => { openedUrl = url } } },
+    })
+    open()
+    assert.equal(openedUrl, 'https://www.aliyun.com/product/ai/alimt')
+  })
+
+  it('阿里云 AccessKey 入口应直达 RAM 用户管理而非主账号密钥页', () => {
+    const aliyunConfig = between(settingsPage, "selectedEngine === 'aliyun'", "selectedEngine === 'caiyun'")
+    assert.match(aliyunConfig, /@click="openAliyunAccessKeys">前往 RAM 用户管理<\/a>/)
+    assert.match(aliyunConfig, /选择用户 → 凭证管理 → 创建 AccessKey（Secret 仅创建时可见，勿使用主账号密钥）/)
+    const handler = between(settingsPage, 'const openAliyunAccessKeys =', 'const openCaiyunSignup =')
+    let openedUrl = ''
+    const open = runInNewContext(`(() => { ${handler}; return openAliyunAccessKeys })()`, {
+      window: { utools: { shellOpenExternal: url => { openedUrl = url } } },
+    })
+    open()
+    assert.equal(openedUrl, 'https://ram.console.aliyun.com/users')
+  })
+})
+
 describe('翻译请求晚到保护', () => {
   it('卸载翻译页时使当前请求失效，避免离页后回写和结算', () => {
     const teardown = between(translatePage, 'onUnmounted(() => {', '\n})')

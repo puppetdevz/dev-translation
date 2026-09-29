@@ -410,7 +410,11 @@ const openBaiduSignup = () => {
 }
 
 const openAliyunSignup = () => {
-  window.utools.shellOpenExternal('https://www.aliyun.com/product/alimt')
+  window.utools.shellOpenExternal('https://www.aliyun.com/product/ai/alimt')
+}
+
+const openAliyunAccessKeys = () => {
+  window.utools.shellOpenExternal('https://ram.console.aliyun.com/users')
 }
 
 const openCaiyunSignup = () => {
@@ -1156,7 +1160,7 @@ const handleRecentError = () => {
                         <svg v-else viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M2 12s3-7 10-7 10 7 10 7-3 7-10 7-10-7-10-7z"/><circle cx="12" cy="12" r="3"/></svg>
                       </button>
                     </div>
-                    <p class="deepl-config-hint">需开通机器翻译并授予 <code class="hint-code">alimt:TranslateGeneral</code>。通用版单次最多 5000 字符，超长将跳过本引擎。凭据仅保存在本机。<a class="deepl-link" @click="openAliyunSignup">开通阿里云机器翻译</a></p>
+                    <p class="deepl-config-hint">需开通机器翻译并授予 <code class="hint-code">alimt:TranslateGeneral</code>。通用版单次最多 5000 字符，超长将跳过本引擎。凭据仅保存在本机。<a class="deepl-link" @click="openAliyunSignup">开通阿里云机器翻译</a> · <a class="deepl-link" @click="openAliyunAccessKeys">前往 RAM 用户管理</a> → 选择用户 → 凭证管理 → 创建 AccessKey（Secret 仅创建时可见，勿使用主账号密钥）</p>
                   </div>
                 </template>
                 <template v-else-if="selectedEngine === 'caiyun'">
