@@ -86,6 +86,12 @@ export function sanitizeLogEntry(entry) {
     ? entry.skipCategory
     : undefined
   const requestId = Number.isFinite(Number(entry.requestId)) ? Number(entry.requestId) : undefined
+  const groupId = typeof entry.groupId === 'string' && /^g_[a-z0-9_]+$/i.test(entry.groupId)
+    ? entry.groupId
+    : undefined
+  const groupIndex = Number.isInteger(entry.groupIndex) && entry.groupIndex >= 0 && entry.groupIndex < 1000
+    ? entry.groupIndex
+    : undefined
 
   let message = ''
   if (typeof entry.message === 'string' && entry.message && !isUnsafeMessage(entry.message)) {
@@ -107,6 +113,8 @@ export function sanitizeLogEntry(entry) {
   if (requestId != null) out.requestId = requestId
   if (skipReason) out.skipReason = skipReason
   if (skipCategory) out.skipCategory = skipCategory
+  if (groupId) out.groupId = groupId
+  if (groupIndex != null) out.groupIndex = groupIndex
   return out
 }
 
@@ -140,6 +148,8 @@ export function formatSafeLogLine(entry, timeText, levelText) {
   if (entry.phase) meta.push(`阶段=${entry.phase}`)
   if (entry.requestId != null) meta.push(`请求=${entry.requestId}`)
   if (entry.skipReason) meta.push(`跳过=${entry.skipReason}`)
+  if (entry.groupId) meta.push(`组=${entry.groupId}`)
+  if (entry.groupIndex != null) meta.push(`组序号=${entry.groupIndex}`)
   if (meta.length) parts.push(`  元数据: ${meta.join(' ')}`)
   return parts.join('\n')
 }

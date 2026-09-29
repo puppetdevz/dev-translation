@@ -1,5 +1,5 @@
 <script setup>
-import { computed, ref, onMounted, onUnmounted, watch, nextTick } from 'vue'
+import { computed, ref, reactive, onMounted, onUnmounted, watch, nextTick } from 'vue'
 import { useRouter } from 'vue-router'
 import { useSettings } from '../utils/useSettings.js'
 import { copyText } from '../utils/clipboard.js'
@@ -12,7 +12,16 @@ import {
   ENGINE_RESPONSE_TIMEOUT_MIN,
   ENGINE_RESPONSE_TIMEOUT_MAX,
   snapshotEngineTimeoutMs,
+  snapshotThirdpartyAiTimeoutMs,
 } from '../utils/storage.js'
+import {
+  snapshotThirdpartyAiGroups,
+  createEmptyGroup,
+  generateUniqueGroupName,
+  runThirdpartyAiGroupFailover,
+  inspectThirdpartyAiGroup,
+  createGroupRequest,
+} from '../utils/thirdpartyAiGroups.js'
 import {
   createProbeText,
   inspectProbeEngines,
@@ -37,9 +46,21 @@ const handleStrategySelect = (strategy) => {
   updateSetting('detectionStrategy', strategy)
 }
 
+const saveNotice = ref('')
+const persistSetting = (key, value) => {
+  const ok = updateSetting(key, value)
+  saveNotice.value = ok ? '' : '保存失败'
+  return ok
+}
+
 const commitEngineTimeout = (raw) => {
   const normalized = normalizeEngineResponseTimeoutSeconds(raw)
-  updateSetting('engineResponseTimeoutSeconds', normalized)
+  persistSetting('engineResponseTimeoutSeconds', normalized)
+}
+
+const commitGroupTimeout = (raw) => {
+  const normalized = normalizeEngineResponseTimeoutSeconds(raw)
+  persistSetting('thirdpartyAiFailoverTimeoutSeconds', normalized)
 }
 
 const engineMeta = {
@@ -62,19 +83,31 @@ const selectEngine = (engine) => {
 // 引擎配置测试：用固定文本真实调用选中引擎，验证配置是否可用
 const TEST_TEXT = 'Hello World'
 const testingEngine = ref('')
+const testingGroupId = ref('')
 const testResult = ref(null)
 
+let engineTestGen = 0
+
 const runEngineTest = async (engine) => {
-  if (testingEngine.value) return
+  if (testingEngine.value || testingGroupId.value) return
   testingEngine.value = engine
   testResult.value = null
+  const gen = ++engineTestGen
+  const settingsSnap = {
+    ...settings,
+    thirdpartyAiGroups: snapshotThirdpartyAiGroups(settings),
+    thirdpartyAiFailoverTimeoutSeconds: settings.thirdpartyAiFailoverTimeoutSeconds,
+    thirdpartyAiSystemPrompt: settings.thirdpartyAiSystemPrompt || '',
+  }
   try {
-    const inspection = inspectEngine(engine, settings)
+    const inspection = inspectEngine(engine, settingsSnap)
     if (inspection.status === 'skipped') {
+      if (gen !== engineTestGen) return
       testResult.value = { engine, ok: false, message: skipUserMessage(inspection) }
       return
     }
     let result = ''
+    let successGroupName = ''
     switch (engine) {
       case 'ai': {
         const r = await window.utools.ai({
@@ -84,14 +117,27 @@ const runEngineTest = async (engine) => {
         break
       }
       case 'thirdparty-ai': {
-        const data = await window.services.requestThirdpartyAI(
-          settings.thirdpartyAiUrl,
-          settings.thirdpartyAiKey,
-          { model: settings.thirdpartyAiModel, messages: [{ role: 'user', content: 'Translate the following text to Simplified Chinese and reply with the translation only:\n' + TEST_TEXT }], stream: false }
-        )
-        if (data && data.error) throw new Error('自定义 AI 返回错误')
-        result = (data?.choices?.[0]?.message?.content || '').trim()
-        break
+        const chain = await runThirdpartyAiGroupFailover({
+          groups: settingsSnap.thirdpartyAiGroups,
+          timeoutMs: snapshotThirdpartyAiTimeoutMs(settingsSnap),
+          requestGroup: createGroupRequest({
+            includeSystemPrompt: false,
+            messages: [{ role: 'user', content: 'Translate the following text to Simplified Chinese and reply with the translation only:\n' + TEST_TEXT }],
+          }),
+        })
+        if (chain && chain.success) {
+          result = (chain.result && chain.result.translation) || ''
+          const hit = settingsSnap.thirdpartyAiGroups[chain.groupIndex]
+          successGroupName = (hit && hit.name) || `组 ${chain.groupIndex + 1}`
+          break
+        }
+        if (chain && chain.allSkipped) {
+          throw new Error('引擎未配置必要凭据或地址')
+        }
+        const lastFail = [...((chain && chain.outcomes) || [])].reverse().find(o => o.status === 'failure')
+        const err = new Error((lastFail && lastFail.safeMessage) || (chain && chain.message) || '自定义 AI 调用失败')
+        if (lastFail && lastFail.statusCode) err.statusCode = lastFail.statusCode
+        throw err
       }
       case 'google':
         result = await window.services.googleTranslate(TEST_TEXT, 'en', 'zh-CN')
@@ -106,12 +152,18 @@ const runEngineTest = async (engine) => {
         throw new Error('未知引擎')
     }
     if (!result) throw new Error('引擎返回空结果')
-    testResult.value = { engine, ok: true, message: `连接正常：${result}` }
+    if (gen !== engineTestGen) return
+    testResult.value = {
+      engine,
+      ok: true,
+      message: successGroupName ? `连接正常（${successGroupName}）：${result}` : `连接正常：${result}`,
+    }
   } catch (err) {
+    if (gen !== engineTestGen) return
     const classified = classifyError(err)
     testResult.value = { engine, ok: false, message: classified.safeMessage || '测试失败' }
   } finally {
-    testingEngine.value = ''
+    if (gen === engineTestGen) testingEngine.value = ''
   }
 }
 
@@ -128,12 +180,11 @@ watch(
   () => [
     JSON.stringify(settings.failoverOrder || []),
     settings.engineResponseTimeoutSeconds,
+    settings.thirdpartyAiFailoverTimeoutSeconds,
     settings.deeplApiKey,
     settings.deeplxServerUrl,
     settings.deeplxToken,
-    settings.thirdpartyAiUrl,
-    settings.thirdpartyAiKey,
-    settings.thirdpartyAiModel,
+    JSON.stringify((settings.thirdpartyAiGroups || []).map(g => [g.id, g.name, g.url, g.apiKey, g.model])),
     settings.thirdpartyAiSystemPrompt,
   ],
   () => {
@@ -260,50 +311,213 @@ const openDeeplxGuide = () => {
   window.utools.shellOpenExternal('https://github.com/OwO-Network/DeepLX')
 }
 
-// 第三方 AI 模型列表远程获取
-const fetchingModels = ref(false)
-const modelList = ref([])
-const modelListError = ref('')
+const thirdpartyGroups = computed(() => Array.isArray(settings.thirdpartyAiGroups) ? settings.thirdpartyAiGroups : [])
 
-const handleFetchModels = async () => {
-  if (fetchingModels.value) return
-  if (!settings.thirdpartyAiUrl || !settings.thirdpartyAiUrl.trim()) {
-    modelListError.value = '请先填写 API 链接'
-    modelList.value = []
+const persistGroups = (groups) => persistSetting('thirdpartyAiGroups', groups)
+
+const groupUi = reactive({})
+const ensureGroupUi = (id) => {
+  if (!groupUi[id]) {
+    groupUi[id] = {
+      showKey: false,
+      fetching: false,
+      models: [],
+      error: '',
+      fetchGen: 0,
+      testGen: 0,
+      testResult: null,
+      pendingDelete: false,
+      nameError: '',
+    }
+  }
+  return groupUi[id]
+}
+
+watch(thirdpartyGroups, (groups) => {
+  const ids = new Set((groups || []).map(g => g.id))
+  for (const g of groups || []) ensureGroupUi(g.id)
+  for (const id of Object.keys(groupUi)) {
+    if (!ids.has(id)) delete groupUi[id]
+  }
+}, { immediate: true })
+
+const bumpGroupAsync = (id) => {
+  const ui = ensureGroupUi(id)
+  ui.fetchGen += 1
+  ui.testGen += 1
+  ui.models = []
+  ui.error = ''
+  ui.testResult = null
+}
+
+const patchGroup = (id, patch) => {
+  const groups = snapshotThirdpartyAiGroups(settings)
+  const idx = groups.findIndex(g => g.id === id)
+  if (idx < 0) return false
+  const next = groups.map((g, i) => i === idx ? { ...g, ...patch } : g)
+  if ('url' in patch || 'apiKey' in patch || 'model' in patch) bumpGroupAsync(id)
+  return persistGroups(next)
+}
+
+const addAiGroup = () => {
+  const groups = snapshotThirdpartyAiGroups(settings)
+  const created = createEmptyGroup(groups.map(g => g.name), groups.map(g => g.id))
+  persistGroups([...groups, created])
+  ensureGroupUi(created.id)
+}
+
+const requestDeleteGroup = (id) => {
+  ensureGroupUi(id).pendingDelete = true
+}
+
+const cancelDeleteGroup = (id) => {
+  if (groupUi[id]) groupUi[id].pendingDelete = false
+}
+
+const confirmDeleteGroup = (id) => {
+  const groups = snapshotThirdpartyAiGroups(settings).filter(g => g.id !== id)
+  persistGroups(groups)
+  delete groupUi[id]
+}
+
+const commitGroupName = (id, raw) => {
+  const ui = ensureGroupUi(id)
+  const groups = snapshotThirdpartyAiGroups(settings)
+  const idx = groups.findIndex(g => g.id === id)
+  if (idx < 0) return
+  let name = String(raw || '').trim()
+  const others = groups.filter((_, i) => i !== idx)
+  if (!name) name = generateUniqueGroupName(others.map(g => g.name))
+  if (others.some(g => g.name === name)) {
+    ui.nameError = '名称已存在，未保存'
     return
   }
-  if (!settings.thirdpartyAiKey || !settings.thirdpartyAiKey.trim()) {
-    modelListError.value = '请先填写 API Key'
-    modelList.value = []
+  ui.nameError = ''
+  if (groups[idx].name === name) return
+  persistGroups(groups.map((g, i) => i === idx ? { ...g, name } : g))
+}
+
+const groupDragIndex = ref(null)
+const groupDragOverIndex = ref(null)
+const groupDragOverPos = ref(null)
+
+const onGroupDragStart = (index) => { groupDragIndex.value = index }
+const onGroupDragOver = (index, event) => {
+  if (groupDragIndex.value === null || groupDragIndex.value === index) return
+  const rect = event.currentTarget.getBoundingClientRect()
+  const isAfter = (event.clientY - rect.top) > rect.height / 2
+  groupDragOverIndex.value = index
+  groupDragOverPos.value = isAfter ? 'after' : 'before'
+}
+const onGroupDrop = (index) => {
+  if (groupDragIndex.value === null || groupDragIndex.value === index) {
+    groupDragIndex.value = null
+    groupDragOverIndex.value = null
+    groupDragOverPos.value = null
+    return
+  }
+  const newOrder = snapshotThirdpartyAiGroups(settings)
+  const [moved] = newOrder.splice(groupDragIndex.value, 1)
+  let insertIndex = groupDragOverPos.value === 'after' ? index + 1 : index
+  if (groupDragIndex.value < insertIndex) insertIndex -= 1
+  newOrder.splice(insertIndex, 0, moved)
+  persistGroups(newOrder)
+  groupDragIndex.value = null
+  groupDragOverIndex.value = null
+  groupDragOverPos.value = null
+}
+const onGroupDragEnd = () => {
+  groupDragIndex.value = null
+  groupDragOverIndex.value = null
+  groupDragOverPos.value = null
+}
+
+const handleFetchModels = async (groupId) => {
+  const group = thirdpartyGroups.value.find(g => g.id === groupId)
+  const ui = ensureGroupUi(groupId)
+  if (!group || ui.fetching) return
+  if (!group.url || !String(group.url).trim()) {
+    ui.error = '请先填写 API 链接'
+    ui.models = []
+    return
+  }
+  if (!group.apiKey || !String(group.apiKey).trim()) {
+    ui.error = '请先填写 API Key'
+    ui.models = []
     return
   }
   if (!window.services || typeof window.services.fetchThirdpartyModels !== 'function') {
-    modelListError.value = '翻译服务未加载。请重载插件，或确认安装的是最新版本后重新安装。'
+    ui.error = '翻译服务未加载。请重载插件，或确认安装的是最新版本后重新安装。'
     return
   }
-  fetchingModels.value = true
-  modelListError.value = ''
-  modelList.value = []
+  const snapUrl = group.url
+  const snapKey = group.apiKey
+  const gen = ++ui.fetchGen
+  ui.fetching = true
+  ui.error = ''
+  ui.models = []
   try {
-    const models = await window.services.fetchThirdpartyModels(
-      settings.thirdpartyAiUrl,
-      settings.thirdpartyAiKey
-    )
-    modelList.value = models
+    const models = await window.services.fetchThirdpartyModels(snapUrl, snapKey)
+    if (ui.fetchGen !== gen) return
+    const current = thirdpartyGroups.value.find(g => g.id === groupId)
+    if (!current || current.url !== snapUrl || current.apiKey !== snapKey) return
+    ui.models = Array.isArray(models) ? models : []
   } catch (err) {
+    if (ui.fetchGen !== gen) return
     const classified = classifyError(err)
-    modelListError.value = classified.safeMessage || '获取模型失败'
+    ui.error = classified.safeMessage || '获取模型失败'
   } finally {
-    fetchingModels.value = false
+    if (ui.fetchGen === gen) ui.fetching = false
   }
 }
 
-const selectModel = (model) => {
-  updateSetting('thirdpartyAiModel', model)
+const selectModel = (groupId, model) => {
+  patchGroup(groupId, { model })
 }
 
-// 自定义 AI API Key 显示/隐藏切换
-const showThirdpartyAiKey = ref(false)
+const runGroupTest = async (groupId) => {
+  if (testingEngine.value || testingGroupId.value) return
+  const group = thirdpartyGroups.value.find(g => g.id === groupId)
+  if (!group) return
+  const ui = ensureGroupUi(groupId)
+  const snap = { ...group }
+  const gen = ++ui.testGen
+  testingGroupId.value = groupId
+  ui.testResult = null
+  try {
+    const inspection = inspectThirdpartyAiGroup(snap)
+    if (inspection.status === 'skipped') {
+      if (ui.testGen !== gen) return
+      ui.testResult = { ok: false, message: skipUserMessage(inspection) }
+      return
+    }
+    const requestGroup = createGroupRequest({
+      includeSystemPrompt: false,
+      messages: [{ role: 'user', content: 'Translate the following text to Simplified Chinese and reply with the translation only:\n' + TEST_TEXT }],
+    })
+    const chain = await runThirdpartyAiGroupFailover({
+      groups: [snap],
+      timeoutMs: snapshotThirdpartyAiTimeoutMs(settings),
+      requestGroup,
+    })
+    if (ui.testGen !== gen) return
+    const still = thirdpartyGroups.value.find(g => g.id === groupId)
+    if (!still || still.url !== snap.url || still.apiKey !== snap.apiKey || still.model !== snap.model) return
+    if (chain && chain.success) {
+      const text = (chain.result && chain.result.translation) || ''
+      ui.testResult = { ok: true, message: text ? `连接正常：${text}` : '连接正常' }
+      return
+    }
+    const lastFail = [...((chain && chain.outcomes) || [])].reverse().find(o => o.status === 'failure' || o.status === 'skipped')
+    ui.testResult = { ok: false, message: (lastFail && lastFail.safeMessage) || skipUserMessage(lastFail) || '测试失败' }
+  } catch (err) {
+    if (ui.testGen !== gen) return
+    const classified = classifyError(err)
+    ui.testResult = { ok: false, message: classified.safeMessage || '测试失败' }
+  } finally {
+    if (testingGroupId.value === groupId) testingGroupId.value = ''
+  }
+}
 // DeepL API Key 显示/隐藏切换
 const showDeeplApiKey = ref(false)
 // DeepLX 访问令牌显示/隐藏切换
@@ -549,10 +763,11 @@ const handleRecentError = () => {
       <div class="settings-section">
         <h3 class="section-title">翻译引擎配置</h3>
         <p class="section-hint">拖拽列表调整故障转移顺序（首位为主引擎），点击查看引擎配置。</p>
+        <p v-if="saveNotice" class="save-failed-notice">{{ saveNotice }}</p>
         <div class="timeout-row">
           <div class="timeout-row-info">
             <span class="timeout-row-label">翻译引擎响应超时（秒）</span>
-            <span class="timeout-row-desc">每个已调用引擎在此时限内未取得主译文则视为失败并尝试下一个。默认 5 秒，范围 {{ ENGINE_RESPONSE_TIMEOUT_MIN }}–{{ ENGINE_RESPONSE_TIMEOUT_MAX }}。</span>
+            <span class="timeout-row-desc">每个已调用引擎在此时限内未取得主译文则视为失败并尝试下一个。自定义 AI 各组使用独立的组超时，不受此时限截断。默认 5 秒，范围 {{ ENGINE_RESPONSE_TIMEOUT_MIN }}–{{ ENGINE_RESPONSE_TIMEOUT_MAX }}。</span>
           </div>
           <input
             class="timeout-input"
@@ -672,42 +887,111 @@ const handleRecentError = () => {
                 </template>
                 <template v-else-if="selectedEngine === 'thirdparty-ai'">
                   <div class="thirdparty-ai-config" style="margin-top: 0;">
-                    <label class="deepl-config-label">API 链接</label>
-                    <input class="deepl-api-input" type="text" :value="settings.thirdpartyAiUrl" @input="updateSetting('thirdpartyAiUrl', $event.target.value)" placeholder="https://api.openai.com/v1（只需填到 v1）" />
-                    <label class="deepl-config-label" style="margin-top: 10px;">API Key</label>
-                    <div class="input-with-eye">
-                      <input class="deepl-api-input" :type="showThirdpartyAiKey ? 'text' : 'password'" :value="settings.thirdpartyAiKey" @input="updateSetting('thirdpartyAiKey', $event.target.value)" placeholder="sk-..." />
-                      <button type="button" class="eye-toggle" :class="{ active: showThirdpartyAiKey }" @click="showThirdpartyAiKey = !showThirdpartyAiKey" :title="showThirdpartyAiKey ? '隐藏 Key' : '显示 Key'">
-                        <svg v-if="showThirdpartyAiKey" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17.94 17.94A10.94 10.94 0 0 1 12 20c-7 0-10-8-10-8a18.45 18.45 0 0 1 5.06-5.94M9.9 4.24A10.94 10.94 0 0 1 12 4c7 0 10 8 10 8a18.5 18.5 0 0 1-2.16 3.19M9.9 9.9a3 3 0 0 1 4.2 4.2"/><line x1="2" y1="2" x2="22" y2="22"/></svg>
-                        <svg v-else viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M2 12s3-7 10-7 10 7 10 7-3 7-10 7-10-7-10-7z"/><circle cx="12" cy="12" r="3"/></svg>
-                      </button>
+                    <p class="deepl-config-hint" style="margin-top: 0;">按组顺序逐一尝试，首组成功即停止；全部未成功才切换下一引擎。真实调用可能消耗额度并按组计时。</p>
+                    <div v-if="thirdpartyGroups.length === 0" class="group-empty">暂无自定义 AI 组，该引擎将被跳过。</div>
+                    <div class="ai-group-list">
+                      <div
+                        v-for="(group, gIndex) in thirdpartyGroups"
+                        :key="group.id"
+                        class="ai-group-card"
+                        :class="{
+                          dragging: groupDragIndex === gIndex,
+                          'drag-over-before': groupDragOverIndex === gIndex && groupDragIndex !== gIndex && groupDragOverPos === 'before',
+                          'drag-over-after': groupDragOverIndex === gIndex && groupDragIndex !== gIndex && groupDragOverPos === 'after',
+                        }"
+                        draggable="true"
+                        @dragstart="onGroupDragStart(gIndex)"
+                        @dragover.prevent="onGroupDragOver(gIndex, $event)"
+                        @drop.prevent="onGroupDrop(gIndex)"
+                        @dragend="onGroupDragEnd"
+                      >
+                        <div class="ai-group-head">
+                          <span class="engine-drag-handle" title="拖拽调整组顺序">⠿</span>
+                          <span class="ai-group-priority">G{{ gIndex + 1 }}</span>
+                          <input
+                            class="ai-group-name"
+                            type="text"
+                            :value="group.name"
+                            placeholder="组名称"
+                            @blur="commitGroupName(group.id, $event.target.value)"
+                            @keydown.enter.prevent="$event.target.blur()"
+                          />
+                          <button
+                            type="button"
+                            class="group-mini-btn"
+                            :disabled="!!testingEngine || !!testingGroupId"
+                            @click.stop="runGroupTest(group.id)"
+                          >{{ testingGroupId === group.id ? '测试中' : '测试' }}</button>
+                          <button
+                            v-if="!groupUi[group.id].pendingDelete"
+                            type="button"
+                            class="group-mini-btn group-mini-danger"
+                            @click.stop="requestDeleteGroup(group.id)"
+                          >删除</button>
+                          <span v-else class="group-delete-confirm">
+                            <span>确认删除？</span>
+                            <button type="button" class="group-mini-btn" @click.stop="cancelDeleteGroup(group.id)">取消</button>
+                            <button type="button" class="group-mini-btn group-mini-danger" @click.stop="confirmDeleteGroup(group.id)">确认</button>
+                          </span>
+                        </div>
+                        <p v-if="groupUi[group.id].nameError" class="model-fetch-error">{{ groupUi[group.id].nameError }}</p>
+                        <label class="deepl-config-label">API 链接</label>
+                        <input class="deepl-api-input" type="text" :value="group.url" @input="patchGroup(group.id, { url: $event.target.value })" placeholder="https://api.openai.com/v1（只需填到 v1）" />
+                        <label class="deepl-config-label" style="margin-top: 8px;">API Key</label>
+                        <div class="input-with-eye">
+                          <input class="deepl-api-input" :type="groupUi[group.id].showKey ? 'text' : 'password'" :value="group.apiKey" @input="patchGroup(group.id, { apiKey: $event.target.value })" placeholder="sk-..." />
+                          <button type="button" class="eye-toggle" :class="{ active: groupUi[group.id].showKey }" @click="groupUi[group.id].showKey = !groupUi[group.id].showKey" :title="groupUi[group.id].showKey ? '隐藏 Key' : '显示 Key'">
+                            <svg v-if="groupUi[group.id].showKey" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17.94 17.94A10.94 10.94 0 0 1 12 20c-7 0-10-8-10-8a18.45 18.45 0 0 1 5.06-5.94M9.9 4.24A10.94 10.94 0 0 1 12 4c7 0 10 8 10 8a18.5 18.5 0 0 1-2.16 3.19M9.9 9.9a3 3 0 0 1 4.2 4.2"/><line x1="2" y1="2" x2="22" y2="22"/></svg>
+                            <svg v-else viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M2 12s3-7 10-7 10 7 10 7-3 7-10 7-10-7-10-7z"/><circle cx="12" cy="12" r="3"/></svg>
+                          </button>
+                        </div>
+                        <label class="deepl-config-label" style="margin-top: 8px;">模型</label>
+                        <div class="model-input-row">
+                          <input class="deepl-api-input model-input" type="text" :value="group.model" @input="patchGroup(group.id, { model: $event.target.value })" placeholder="gpt-4o / deepseek-chat / qwen-plus" />
+                          <button class="fetch-models-btn" :disabled="groupUi[group.id].fetching" @click="handleFetchModels(group.id)">
+                            <span v-if="!groupUi[group.id].fetching">获取模型</span>
+                            <span v-else class="fetch-models-loading">
+                              <span class="loading-dot"></span>
+                              <span class="loading-dot"></span>
+                              <span class="loading-dot"></span>
+                            </span>
+                          </button>
+                        </div>
+                        <p v-if="groupUi[group.id].error" class="model-fetch-error">{{ groupUi[group.id].error }}</p>
+                        <div v-if="groupUi[group.id].models.length" class="model-list">
+                          <button
+                            v-for="m in groupUi[group.id].models"
+                            :key="m"
+                            class="model-chip"
+                            :class="{ active: m === group.model }"
+                            :title="m"
+                            @click="selectModel(group.id, m)"
+                          >{{ m }}</button>
+                        </div>
+                        <p v-if="groupUi[group.id].testResult" class="group-test-msg" :class="groupUi[group.id].testResult.ok ? 'test-ok-text' : 'test-fail-text'">{{ groupUi[group.id].testResult.message }}</p>
+                      </div>
                     </div>
-                    <label class="deepl-config-label" style="margin-top: 10px;">模型</label>
-                    <div class="model-input-row">
-                      <input class="deepl-api-input model-input" type="text" :value="settings.thirdpartyAiModel" @input="updateSetting('thirdpartyAiModel', $event.target.value)" placeholder="gpt-4o / deepseek-chat / qwen-plus" />
-                      <button class="fetch-models-btn" :disabled="fetchingModels" @click="handleFetchModels">
-                        <span v-if="!fetchingModels">获取模型</span>
-                        <span v-else class="fetch-models-loading">
-                          <span class="loading-dot"></span>
-                          <span class="loading-dot"></span>
-                          <span class="loading-dot"></span>
-                        </span>
-                      </button>
+                    <button type="button" class="add-group-btn" @click="addAiGroup">新增组</button>
+                    <div class="timeout-row" style="margin: 10px 0 0 0;">
+                      <div class="timeout-row-info">
+                        <span class="timeout-row-label">自定义 AI 组超时（秒）</span>
+                        <span class="timeout-row-desc">每个组单独计时，超时立即尝试下一组；不受上方一级引擎超时截断。多组挂起时总耗时约 组数×该时限。默认 5 秒，范围 {{ ENGINE_RESPONSE_TIMEOUT_MIN }}–{{ ENGINE_RESPONSE_TIMEOUT_MAX }}。</span>
+                      </div>
+                      <input
+                        class="timeout-input"
+                        type="number"
+                        :min="ENGINE_RESPONSE_TIMEOUT_MIN"
+                        :max="ENGINE_RESPONSE_TIMEOUT_MAX"
+                        step="1"
+                        :value="settings.thirdpartyAiFailoverTimeoutSeconds"
+                        @change="commitGroupTimeout($event.target.value)"
+                        @blur="commitGroupTimeout($event.target.value)"
+                        aria-label="自定义 AI 组超时（秒）"
+                      />
                     </div>
-                    <p v-if="modelListError" class="model-fetch-error">{{ modelListError }}</p>
-                    <div v-if="modelList.length" class="model-list">
-                      <button
-                        v-for="m in modelList"
-                        :key="m"
-                        class="model-chip"
-                        :class="{ active: m === settings.thirdpartyAiModel }"
-                        :title="m"
-                        @click="selectModel(m)"
-                      >{{ m }}</button>
-                    </div>
-                    <label class="deepl-config-label" style="margin-top: 10px;">系统提示词（翻译时追加到默认指令）</label>
-                    <textarea class="thirdparty-ai-prompt" :value="settings.thirdpartyAiSystemPrompt" @input="updateSetting('thirdpartyAiSystemPrompt', $event.target.value)" placeholder="可选。填写后作为 system role，user role 仍放默认翻译指令。留空仅用默认指令。" rows="4"></textarea>
-                    <p class="deepl-config-hint">兼容 OpenAI 协议（Bearer Key 认证）。API 链接只需填到 <code class="hint-code">/v1</code>，程序自动补全 <code class="hint-code">/chat/completions</code>。支持 OpenAI/DeepSeek/通义千问/Moonshot 等。系统提示词留空时仅用默认翻译指令。</p>
+                    <label class="deepl-config-label" style="margin-top: 10px;">通用系统提示词（适用于所有自定义 AI 组）</label>
+                    <textarea class="thirdparty-ai-prompt" :value="settings.thirdpartyAiSystemPrompt" @input="persistSetting('thirdpartyAiSystemPrompt', $event.target.value)" placeholder="可选。正式翻译时作为 system 消息发给每一组；user 消息仍是默认中英互译指令。留空不追加 system。不用于 uTools AI、润色或配置测试。" rows="3"></textarea>
+                    <p class="deepl-config-hint">兼容 OpenAI 协议（Bearer Key 认证）。API 链接只需填到 <code class="hint-code">/v1</code>，程序自动补全 <code class="hint-code">/chat/completions</code>。组测试与「测试配置」会真实请求，可能消耗额度，且不发送上述系统提示词、不计入成功率。</p>
                   </div>
                 </template>
                 <template v-else>
@@ -722,7 +1006,7 @@ const handleRecentError = () => {
                   <button
                     class="engine-test-btn"
                     :class="{ 'is-testing': testingEngine === selectedEngine }"
-                    :disabled="!!testingEngine"
+                    :disabled="!!testingEngine || !!testingGroupId"
                     @click="runEngineTest(selectedEngine)"
                   >
                     <template v-if="testingEngine !== selectedEngine">
@@ -747,6 +1031,7 @@ const handleRecentError = () => {
                       <span class="engine-test-msg">{{ testResult.message }}</span>
                     </div>
                   </Transition>
+                  <p v-if="selectedEngine === 'thirdparty-ai'" class="deepl-config-hint" style="margin-top: 8px;">「测试配置」按组顺序测试整条组链，成功时指出实际命中的组；各组「测试」只测该组。真实请求可能消耗额度，不计入成功率、不改变顺序。</p>
                 </div>
 
                 <div class="config-divider"></div>
@@ -871,12 +1156,14 @@ const handleRecentError = () => {
                   <span class="log-level-tag">{{ levelLabel(entry.level) }}</span>
                   <span class="log-engine">{{ engineName(entry.engine) }}</span>
                   <div class="log-message">{{ entry.message }}</div>
-                  <div v-if="entry.category || entry.statusCode || entry.phase || entry.skipReason" class="log-detail">
+                  <div v-if="entry.category || entry.statusCode || entry.phase || entry.skipReason || entry.groupId || entry.groupIndex != null" class="log-detail">
                     <span v-if="entry.category">类别 {{ entry.category }}</span>
                     <span v-if="entry.statusCode"> · 状态 {{ entry.statusCode }}</span>
                     <span v-if="entry.phase"> · 阶段 {{ entry.phase }}</span>
                     <span v-if="entry.skipReason"> · 跳过 {{ entry.skipReason }}</span>
                     <span v-if="entry.requestId != null"> · 请求 {{ entry.requestId }}</span>
+                    <span v-if="entry.groupId"> · 组 {{ entry.groupId }}</span>
+                    <span v-if="entry.groupIndex != null"> · 组序号 {{ entry.groupIndex }}</span>
                   </div>
                 </div>
               </div>
@@ -1642,6 +1929,156 @@ const handleRecentError = () => {
   color: var(--text-secondary, #94a3b8);
 }
 
+.save-failed-notice {
+  margin: -4px 0 12px 0;
+  font-size: 12px;
+  font-weight: 600;
+  color: #dc2626;
+  line-height: 1.4;
+}
+
+.group-empty {
+  padding: 10px 12px;
+  margin-bottom: 8px;
+  font-size: 12px;
+  color: var(--text-secondary, #64748b);
+  background: rgba(248, 250, 252, 0.8);
+  border: 1px solid rgba(226, 232, 240, 0.6);
+  border-radius: 10px;
+}
+
+.ai-group-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.ai-group-card {
+  padding: 10px;
+  background: rgba(248, 250, 252, 0.9);
+  border: 1px solid rgba(226, 232, 240, 0.8);
+  border-radius: 10px;
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.03);
+}
+
+.ai-group-card.dragging {
+  opacity: 0.55;
+}
+
+.ai-group-card.drag-over-before {
+  box-shadow: 0 -2px 0 #667eea;
+}
+
+.ai-group-card.drag-over-after {
+  box-shadow: 0 2px 0 #667eea;
+}
+
+.ai-group-head {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-bottom: 8px;
+}
+
+.ai-group-priority {
+  flex-shrink: 0;
+  font-size: 11px;
+  font-weight: 700;
+  color: var(--text-secondary, #64748b);
+  background: rgba(226, 232, 240, 0.7);
+  border: 1px solid rgba(226, 232, 240, 0.9);
+  border-radius: 6px;
+  padding: 2px 6px;
+}
+
+.ai-group-name {
+  flex: 1;
+  min-width: 0;
+  padding: 6px 8px;
+  border: 1px solid rgba(226, 232, 240, 0.8);
+  border-radius: 8px;
+  font-size: 13px;
+  font-weight: 600;
+  background: white;
+  color: var(--text-primary, #1e293b);
+  outline: none;
+  font-family: inherit;
+}
+
+.ai-group-name:focus {
+  border-color: rgba(99, 102, 241, 0.5);
+}
+
+.group-mini-btn {
+  flex-shrink: 0;
+  padding: 4px 8px;
+  border: 1px solid rgba(226, 232, 240, 0.9);
+  background: white;
+  border-radius: 8px;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text-primary, #1e293b);
+  cursor: pointer;
+  font-family: inherit;
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.03);
+}
+
+.group-mini-btn:hover:not(:disabled) {
+  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.06);
+}
+
+.group-mini-btn:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+
+.group-mini-danger {
+  color: #dc2626;
+}
+
+.group-delete-confirm {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 12px;
+  color: #dc2626;
+  flex-wrap: wrap;
+}
+
+.add-group-btn {
+  margin-top: 8px;
+  width: 100%;
+  padding: 7px 12px;
+  border: 1px dashed rgba(102, 126, 234, 0.45);
+  background: rgba(99, 102, 241, 0.06);
+  border-radius: 10px;
+  font-size: 12px;
+  font-weight: 600;
+  color: #4f46e5;
+  cursor: pointer;
+  font-family: inherit;
+}
+
+.add-group-btn:hover {
+  opacity: 0.92;
+}
+
+.group-test-msg {
+  margin: 8px 0 0 0;
+  font-size: 12px;
+  line-height: 1.4;
+  overflow-wrap: break-word;
+  word-break: break-word;
+}
+
+.test-ok-text {
+  color: #059669;
+}
+
+.test-fail-text {
+  color: #dc2626;
+}
+
 /* 模型输入框 + 获取按钮组合 */
 .model-input-row {
   display: flex;
@@ -2206,6 +2643,46 @@ const handleRecentError = () => {
     color: var(--text-secondary, #64748b);
   }
 
+  .save-failed-notice {
+    color: #f87171;
+  }
+
+  .group-empty,
+  .ai-group-card {
+    background: rgba(15, 23, 42, 0.6);
+    border-color: rgba(51, 65, 85, 0.6);
+    color: var(--text-secondary, #94a3b8);
+  }
+
+  .ai-group-priority {
+    background: rgba(51, 65, 85, 0.6);
+    border-color: rgba(71, 85, 105, 0.8);
+    color: var(--text-secondary, #94a3b8);
+  }
+
+  .ai-group-name,
+  .group-mini-btn {
+    background: rgba(30, 41, 59, 0.6);
+    border-color: rgba(51, 65, 85, 0.6);
+    color: var(--text-primary, #f1f5f9);
+  }
+
+  .group-mini-danger,
+  .group-delete-confirm,
+  .test-fail-text {
+    color: #f87171;
+  }
+
+  .test-ok-text {
+    color: #34d399;
+  }
+
+  .add-group-btn {
+    background: rgba(99, 102, 241, 0.12);
+    border-color: rgba(99, 102, 241, 0.35);
+    color: #a5b4fc;
+  }
+
   .hint-code {
     background: rgba(99, 102, 241, 0.2);
     color: #a5b4fc;
@@ -2310,6 +2787,10 @@ const handleRecentError = () => {
 
   .engine-card-name {
     font-size: 12px;
+  }
+
+  .ai-group-head {
+    flex-wrap: wrap;
   }
 }
 

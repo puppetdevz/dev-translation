@@ -3,6 +3,14 @@
  * 使用 uTools dbStorage API 实现持久化
  */
 
+import {
+  defaultThirdpartyAiGroups,
+  migrateLegacyThirdpartyAiGroup,
+  normalizeThirdpartyAiGroups,
+  cloneGroups,
+  stripLegacyThirdpartyAiFields,
+} from './thirdpartyAiGroups.js'
+
 const STORAGE_KEY = 'dev-translation-settings'
 
 export const ENGINE_RESPONSE_TIMEOUT_MIN = 1
@@ -32,6 +40,20 @@ export function snapshotEngineTimeoutMs(settings) {
   return normalizeEngineResponseTimeoutSeconds(settings && settings.engineResponseTimeoutSeconds) * 1000
 }
 
+export function snapshotThirdpartyAiTimeoutMs(settings) {
+  return normalizeEngineResponseTimeoutSeconds(settings && settings.thirdpartyAiFailoverTimeoutSeconds) * 1000
+}
+
+function cloneSettings(settings) {
+  const next = { ...settings }
+  if (Array.isArray(settings.failoverOrder)) {
+    next.failoverOrder = [...settings.failoverOrder]
+  }
+  next.thirdpartyAiGroups = cloneGroups(settings.thirdpartyAiGroups || [])
+  stripLegacyThirdpartyAiFields(next)
+  return next
+}
+
 // 默认设置
 export const DEFAULT_SETTINGS = {
   showPhonetic: true,           // 显示音标
@@ -46,10 +68,9 @@ export const DEFAULT_SETTINGS = {
   deeplApiKey: '',              // DeepL 官方 API Key（Free 版以 :fx 结尾，注册地址 https://www.deepl.com/pro-api）
   deeplxServerUrl: '',          // DeepLX 服务器地址（如 http://localhost:1188）
   deeplxToken: '',              // DeepLX 访问令牌（可选，自部署无 token 时留空）
-  thirdpartyAiUrl: '',              // 第三方 AI API 链接（完整 endpoint，如 https://api.openai.com/v1/chat/completions）
-  thirdpartyAiKey: '',              // 第三方 AI API Key（Bearer token）
-  thirdpartyAiModel: '',            // 第三方 AI 模型名（如 gpt-4o, deepseek-chat, qwen-plus）
-  thirdpartyAiSystemPrompt: '',     // 第三方 AI 翻译时追加的系统提示词（作为 system role，user role 仍放默认指令）
+  thirdpartyAiGroups: defaultThirdpartyAiGroups(), // 自定义 AI 二级组：[{ id, name, url, apiKey, model }]，空数组表示零组
+  thirdpartyAiFailoverTimeoutSeconds: ENGINE_RESPONSE_TIMEOUT_DEFAULT, // 每个自定义 AI 组各自的二级时限（秒），与一级引擎超时相互独立
+  thirdpartyAiSystemPrompt: '',     // 所有自定义 AI 组共用的系统提示词（作为 system role，user role 仍放默认指令）
   logLevel: 'error',                // 日志记录等级: 'debug' | 'info' | 'error'（默认仅记录错误，便于排查翻译失败）
   logRetentionDays: 7,              // 日志保留天数: 1/3/7/0(永久)，到期自动清理；始终受最大条数封顶
 }
@@ -66,8 +87,9 @@ export const loadSettings = () => {
     const stored = window.utools.dbStorage.getItem(STORAGE_KEY)
     // 校验 stored 必须是非空字符串，避免 dbStorage 返回 ''/null/对象时被 JSON.parse 抛错或被 if(stored) 误判
     if (typeof stored === 'string' && stored) {
-      // 合并默认设置，确保新增字段有默认值
-      const merged = { ...DEFAULT_SETTINGS, ...JSON.parse(stored) }
+      const parsed = JSON.parse(stored)
+      // 合并默认设置，确保新增字段有默认值。组字段必须看 parsed 是否存在：空数组是合法的零组。
+      const merged = { ...DEFAULT_SETTINGS, ...parsed }
       // 兼容旧版本：若没有 failoverOrder，则用原主引擎 + 其他引擎初始化（主引擎首位）
       if (!merged.failoverOrder || !Array.isArray(merged.failoverOrder) || merged.failoverOrder.length === 0) {
         const main = merged.translationEngine || 'ai'
@@ -119,12 +141,20 @@ export const loadSettings = () => {
       merged.engineResponseTimeoutSeconds = normalizeEngineResponseTimeoutSeconds(
         merged.engineResponseTimeoutSeconds
       )
-      return merged
+      merged.thirdpartyAiFailoverTimeoutSeconds = normalizeEngineResponseTimeoutSeconds(
+        merged.thirdpartyAiFailoverTimeoutSeconds
+      )
+      if (Array.isArray(parsed.thirdpartyAiGroups)) {
+        merged.thirdpartyAiGroups = normalizeThirdpartyAiGroups(parsed.thirdpartyAiGroups)
+      } else {
+        merged.thirdpartyAiGroups = migrateLegacyThirdpartyAiGroup(parsed)
+      }
+      return cloneSettings(merged)
     }
   } catch (error) {
     console.error('加载设置失败:', error)
   }
-  return { ...DEFAULT_SETTINGS }
+  return cloneSettings(DEFAULT_SETTINGS)
 }
 
 /**
@@ -134,8 +164,22 @@ export const loadSettings = () => {
  */
 export const saveSettings = (settings) => {
   try {
+    const payload = { ...settings }
+    if (Array.isArray(settings && settings.failoverOrder)) {
+      payload.failoverOrder = [...settings.failoverOrder]
+    }
+    if (Array.isArray(settings && settings.thirdpartyAiGroups)) {
+      payload.thirdpartyAiGroups = cloneGroups(settings.thirdpartyAiGroups)
+    }
+    payload.engineResponseTimeoutSeconds = normalizeEngineResponseTimeoutSeconds(
+      payload.engineResponseTimeoutSeconds
+    )
+    payload.thirdpartyAiFailoverTimeoutSeconds = normalizeEngineResponseTimeoutSeconds(
+      payload.thirdpartyAiFailoverTimeoutSeconds
+    )
+    stripLegacyThirdpartyAiFields(payload)
     // uTools 通常不返回状态；部分存储实现用 false 报告写入失败。
-    return window.utools.dbStorage.setItem(STORAGE_KEY, JSON.stringify(settings)) !== false
+    return window.utools.dbStorage.setItem(STORAGE_KEY, JSON.stringify(payload)) !== false
   } catch {
     // dbStorage 异常可能带入设置值或服务地址，日志只保留固定提示。
     console.error('保存设置失败')

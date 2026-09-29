@@ -45,12 +45,18 @@ function delay(ms) {
 const CONFIGURED = {
   failoverOrder: ['ai', 'thirdparty-ai', 'google', 'deepl', 'deeplx'],
   engineResponseTimeoutSeconds: 5,
+  thirdpartyAiFailoverTimeoutSeconds: 5,
   deeplApiKey: 'k',
   deeplxServerUrl: 'http://localhost:1188',
   deeplxToken: 'tok',
-  thirdpartyAiUrl: 'https://api.example.com/v1',
-  thirdpartyAiKey: 'sk-secret',
-  thirdpartyAiModel: 'm',
+  thirdpartyAiGroups: [{
+    id: 'g_a',
+    name: '自定义 AI 1',
+    url: 'https://api.example.com/v1',
+    apiKey: 'sk-secret',
+    model: 'm',
+  }],
+  thirdpartyAiSystemPrompt: '',
 }
 
 const PRELOAD_SERVICES = {
@@ -137,6 +143,11 @@ describe('snapshotProbeConfig / isProbeConfigUnchanged', () => {
     assert.equal(isProbeConfigUnchanged(snap, { ...CONFIGURED, deeplApiKey: 'other' }), false)
     assert.equal(isProbeConfigUnchanged(snap, { ...CONFIGURED, thirdpartyAiSystemPrompt: 'changed' }), false)
     assert.equal(isProbeConfigUnchanged(snap, { ...CONFIGURED, engineResponseTimeoutSeconds: 1 }), false)
+    assert.equal(isProbeConfigUnchanged(snap, { ...CONFIGURED, thirdpartyAiFailoverTimeoutSeconds: 2 }), false)
+    assert.equal(isProbeConfigUnchanged(snap, {
+      ...CONFIGURED,
+      thirdpartyAiGroups: [{ ...CONFIGURED.thirdpartyAiGroups[0], apiKey: 'sk-other' }],
+    }), false)
     assert.equal(isProbeConfigUnchanged(snap, {
       ...CONFIGURED,
       failoverOrder: ['google', 'ai', 'thirdparty-ai', 'deepl', 'deeplx'],
@@ -339,7 +350,7 @@ describe('runBatchEngineProbe', () => {
     let rejectLate
     const late = new Promise((resolve, reject) => { rejectLate = reject })
     const out = await runBatchEngineProbe({
-      settings: { ...CONFIGURED, deeplApiKey: '', deeplxServerUrl: '', thirdpartyAiUrl: '' },
+      settings: { ...CONFIGURED, deeplApiKey: '', deeplxServerUrl: '', thirdpartyAiGroups: [] },
       env: { services: PRELOAD_SERVICES, utools: {} },
       timeoutMs: 40,
       text: 'Hello World late reject',
@@ -393,7 +404,11 @@ describe('runBatchEngineProbe', () => {
     unblock()
     const out = await probe
     assert.equal(calls.length, 5)
-    assert.ok(calls.every(call => call.text === 'Hello World snapshot' && call.budget === 100))
+    assert.ok(calls.every(call => call.text === 'Hello World snapshot'))
+    const thirdparty = calls.find(c => c.engine === 'thirdparty-ai')
+    const others = calls.filter(c => c.engine !== 'thirdparty-ai')
+    assert.equal(thirdparty.budget, 5000)
+    assert.ok(others.every(call => call.budget === 100))
     assert.equal(snapshot.deeplApiKey, 'k')
     let saved = false
     const decision = applyProbeOrder({
@@ -433,6 +448,57 @@ describe('runBatchEngineProbe', () => {
     assert.equal(getEngineStat('google').total, before.total)
     assert.equal(getEngineStat('google').success, before.success)
     assert.equal(getEngineStat('ai').total || 0, 0)
+  })
+
+  it('自定义 AI 组链计入一个一级结果，耗时为组链累计且不被一级短时限截断', async () => {
+    const calls = []
+    const t0 = Date.now()
+    const settings = {
+      ...CONFIGURED,
+      engineResponseTimeoutSeconds: 1,
+      thirdpartyAiFailoverTimeoutSeconds: 1,
+      failoverOrder: ['thirdparty-ai'],
+      thirdpartyAiGroups: [
+        { id: 'g_1', name: '一', url: 'https://a.example/v1', apiKey: 'sk-a', model: 'm1' },
+        { id: 'g_2', name: '二', url: 'https://b.example/v1', apiKey: 'sk-b', model: 'm2' },
+        { id: 'g_3', name: '三', url: 'https://c.example/v1', apiKey: 'sk-c', model: 'm3' },
+      ],
+    }
+    const env = {
+      utools: { ai: async () => ({ content: 'ok' }) },
+      services: {
+        ...PRELOAD_SERVICES,
+        requestThirdpartyAI: async (url, key, body, ms) => {
+          calls.push({ url, key, model: body.model, ms, hasSystem: (body.messages || []).some(m => m.role === 'system') })
+          if (url.includes('a.example')) {
+            const err = new Error('524 status code (no body)')
+            err.statusCode = 524
+            throw err
+          }
+          if (url.includes('b.example')) return { choices: [{ message: { content: '你好' } }] }
+          throw new Error('should not call group 3')
+        },
+      },
+    }
+    const out = await runBatchEngineProbe({
+      settings,
+      env,
+      timeoutMs: 40,
+      text: 'Hello World chain',
+    })
+    const elapsed = Date.now() - t0
+    const item = out.results.find(r => r.engine === 'thirdparty-ai')
+    assert.equal(item.status, 'success')
+    assert.equal(item.successGroupIndex, 1)
+    assert.ok(item.durationMs >= 0)
+    assert.deepEqual(calls.map(c => c.model), ['m1', 'm2'])
+    assert.ok(calls.every(c => c.hasSystem === false))
+    assert.ok(calls.every(c => c.ms === 1000))
+    assert.ok(elapsed < 300, `组链不应被一级 40ms 截断，实际 ${elapsed}ms`)
+    assert.equal(out.results.filter(r => r.engine === 'thirdparty-ai').length, 1)
+    assert.match(formatProbeItemText(item), /组 2/)
+    assert.equal(JSON.stringify(item).includes('sk-a'), false)
+    assert.equal(JSON.stringify(item).includes('一'), false)
   })
 
   it('onItem 先报告跳过，再分别结算 ready 引擎', async () => {

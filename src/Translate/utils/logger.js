@@ -98,6 +98,8 @@ export function addLog(level, engine, message, extra) {
     requestId: meta.requestId,
     skipReason: meta.skipReason,
     skipCategory: meta.skipCategory,
+    groupId: meta.groupId,
+    groupIndex: meta.groupIndex,
   })
   if (!entry) return
   const logs = readLogs()

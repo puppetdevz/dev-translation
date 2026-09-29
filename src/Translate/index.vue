@@ -9,7 +9,11 @@ import {
   buildPolishPrompt
 } from './prompts/index.js'
 import { useSettings } from './utils/useSettings.js'
-import { snapshotEngineTimeoutMs } from './utils/storage.js'
+import { snapshotEngineTimeoutMs, snapshotThirdpartyAiTimeoutMs } from './utils/storage.js'
+import {
+  runThirdpartyAiGroupFailover,
+  snapshotThirdpartyAiGroups,
+} from './utils/thirdpartyAiGroups.js'
 import { logger } from './utils/logger.js'
 import { recordEngineResult, recordEngineSkip } from './utils/engineStats.js'
 import {
@@ -274,9 +278,11 @@ const translateWithAI = async () => {
   return parseResult(result.content, type)
 }
 
-// 自定义 AI 翻译（OpenAI 兼容协议，系统提示词追加到默认指令）
-const translateWithThirdpartyAI = async (timeoutMs) => {
-  const { thirdpartyAiUrl, thirdpartyAiKey, thirdpartyAiModel, thirdpartyAiSystemPrompt } = settings
+// 自定义 AI 翻译：按快照中的组顺序二级故障转移，共用系统提示词，不受一级时限截断
+const translateWithThirdpartyAI = async (settingsSnap, requestId) => {
+  const groups = snapshotThirdpartyAiGroups(settingsSnap)
+  const timeoutMs = snapshotThirdpartyAiTimeoutMs(settingsSnap)
+  const systemPrompt = (settingsSnap && settingsSnap.thirdpartyAiSystemPrompt) || ''
 
   const lang = detectedLanguage.value || detectLanguage(inputText.value)
   detectedLanguage.value = lang
@@ -284,43 +290,74 @@ const translateWithThirdpartyAI = async (timeoutMs) => {
   const type = detectInputType(inputText.value)
   inputType.value = type
 
-  // 默认指令（user role，含 JSON 格式要求）
   const userPrompt = lang === 'zh'
     ? buildChineseToEnglishPrompt(inputText.value, type)
     : buildEnglishToChinesePrompt(inputText.value, type)
 
-  // messages：system（用户自定义，追加）+ user（默认指令）
   const messages = []
-  if (thirdpartyAiSystemPrompt && thirdpartyAiSystemPrompt.trim()) {
-    messages.push({ role: 'system', content: thirdpartyAiSystemPrompt })
+  if (systemPrompt && String(systemPrompt).trim()) {
+    messages.push({ role: 'system', content: systemPrompt })
   }
   messages.push({ role: 'user', content: userPrompt })
 
-  const data = await window.services.requestThirdpartyAI(
-    thirdpartyAiUrl,
-    thirdpartyAiKey,
-    { model: thirdpartyAiModel, messages, stream: false },
+  const chain = await runThirdpartyAiGroupFailover({
+    groups,
     timeoutMs,
-  )
+    isCurrent: () => requestId === translateRequestId,
+    onGroupSkip: (group, inspection, index) => {
+      logger.warn('thirdparty-ai', inspection.safeMessage, {
+        category: inspection.category,
+        skipReason: inspection.skipReason,
+        skipCategory: inspection.skipCategory,
+        phase: PHASE.SKIP,
+        requestId,
+        groupId: group && group.id,
+        groupIndex: index,
+      })
+    },
+    onGroupFailure: (group, classified, index) => {
+      logger.error('thirdparty-ai', classified.safeMessage, {
+        category: classified.category,
+        statusCode: classified.statusCode,
+        phase: PHASE.CALL,
+        requestId,
+        groupId: group && group.id,
+        groupIndex: index,
+      })
+    },
+    requestGroup: async (group, budget) => {
+      const data = await window.services.requestThirdpartyAI(
+        group.url,
+        group.apiKey,
+        { model: group.model, messages, stream: false },
+        budget,
+      )
+      if (data && data.error) throw new Error('自定义 AI 返回错误')
+      const content = data?.choices?.[0]?.message?.content || ''
+      if (!content) throw new Error('自定义 AI 返回空结果')
+      return parseResult(content, type)
+    },
+  })
 
-  if (data && data.error) {
-    throw new Error('自定义 AI 返回错误')
+  if (chain && chain.stale) {
+    const err = new Error('引擎请求超时')
+    err.stale = true
+    throw err
   }
-
-  const content = data?.choices?.[0]?.message?.content || ''
-  if (!content) throw new Error('自定义 AI 返回空结果')
-
-  // 复用 parseResult 解析（与 translateWithAI 一致）
-  return parseResult(content, type)
+  if (chain && chain.success) return chain.result
+  const lastFail = [...((chain && chain.outcomes) || [])].reverse().find(o => o.status === 'failure')
+  const err = new Error((lastFail && lastFail.safeMessage) || (chain && chain.message) || '自定义 AI 调用失败')
+  if (lastFail && lastFail.statusCode) err.statusCode = lastFail.statusCode
+  throw err
 }
 
 // 引擎调度函数
-const translateWithEngine = async (engine, timeoutMs) => {
+const translateWithEngine = async (engine, timeoutMs, settingsSnap, requestId) => {
   switch (engine) {
     case 'google': return translateWithGoogle(timeoutMs)
     case 'deepl': return translateWithDeepL(timeoutMs)
     case 'deeplx': return translateWithDeepLX(timeoutMs)
-    case 'thirdparty-ai': return translateWithThirdpartyAI(timeoutMs)
+    case 'thirdparty-ai': return translateWithThirdpartyAI(settingsSnap, requestId)
     case 'ai':
     default: return translateWithAI()
   }
@@ -380,15 +417,25 @@ const translate = async () => {
 
   try {
     const order = (settings.failoverOrder && Array.isArray(settings.failoverOrder) && settings.failoverOrder.length > 0)
-      ? settings.failoverOrder
+      ? [...settings.failoverOrder]
       : ['ai']
     const timeoutMs = snapshotEngineTimeoutMs(settings)
+    const settingsSnap = {
+      ...settings,
+      failoverOrder: order,
+      thirdpartyAiGroups: snapshotThirdpartyAiGroups(settings),
+      thirdpartyAiSystemPrompt: settings.thirdpartyAiSystemPrompt || '',
+      thirdpartyAiFailoverTimeoutSeconds: settings.thirdpartyAiFailoverTimeoutSeconds,
+      deeplApiKey: settings.deeplApiKey,
+      deeplxServerUrl: settings.deeplxServerUrl,
+      deeplxToken: settings.deeplxToken,
+    }
 
     const outcome = await runEngineFailover({
       order,
-      settings,
+      settings: settingsSnap,
       timeoutMs,
-      translateWith: (engine) => translateWithEngine(engine, timeoutMs),
+      translateWith: (engine) => translateWithEngine(engine, timeoutMs, settingsSnap, myRequestId),
       isCurrent: () => myRequestId === translateRequestId,
       onSkip: (engine, inspection, meta) => {
         recordEngineSkip(engine, inspection.skipCategory)

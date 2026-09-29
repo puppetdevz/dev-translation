@@ -27,8 +27,13 @@ function delay(ms) {
 const CONFIGURED = {
   deeplApiKey: 'k',
   deeplxServerUrl: 'http://localhost:1188',
-  thirdpartyAiUrl: 'https://api.example.com/v1',
-  thirdpartyAiModel: 'm',
+  thirdpartyAiGroups: [{
+    id: 'g_a',
+    name: '自定义 AI 1',
+    url: 'https://api.example.com/v1',
+    apiKey: 'sk-test',
+    model: 'm',
+  }],
 }
 
 const PRELOAD_SERVICES = {
@@ -46,8 +51,7 @@ describe('inspectEngine', () => {
       const r = inspectEngine(engine, {
         deeplApiKey: 'k',
         deeplxServerUrl: 'http://localhost:1188',
-        thirdpartyAiUrl: 'https://api.example.com/v1',
-        thirdpartyAiModel: 'm',
+        thirdpartyAiGroups: [{ id: 'g_a', name: 'A', url: 'https://api.example.com/v1', apiKey: 'sk', model: 'm' }],
       }, env)
       assert.equal(r.status, 'skipped')
       assert.equal(r.skipReason, SKIP_REASON.BRIDGE_MISSING)
@@ -61,8 +65,7 @@ describe('inspectEngine', () => {
       utools: { ai: async () => ({}) },
     }
     const missing = inspectEngine('thirdparty-ai', {
-      thirdpartyAiUrl: 'https://api.example.com/v1',
-      thirdpartyAiModel: 'm',
+      thirdpartyAiGroups: [{ id: 'g_a', name: 'A', url: 'https://api.example.com/v1', apiKey: 'sk', model: 'm' }],
     }, env)
     const google = inspectEngine('google', {}, env)
     assert.equal(missing.status, 'skipped')
@@ -74,7 +77,7 @@ describe('inspectEngine', () => {
     const env = { services: PRELOAD_SERVICES, utools: { ai: async () => ({}) } }
     const deepl = inspectEngine('deepl', { deeplApiKey: '' }, env)
     const deeplx = inspectEngine('deeplx', { deeplxServerUrl: '  ' }, env)
-    const ai3 = inspectEngine('thirdparty-ai', { thirdpartyAiUrl: 'https://x', thirdpartyAiModel: '' }, env)
+    const ai3 = inspectEngine('thirdparty-ai', { thirdpartyAiGroups: [{ id: 'g_a', name: 'A', url: 'https://x', apiKey: 'sk', model: '' }] }, env)
     assert.equal(deepl.skipReason, SKIP_REASON.NOT_CONFIGURED)
     assert.equal(deeplx.skipReason, SKIP_REASON.NOT_CONFIGURED)
     assert.equal(ai3.skipReason, SKIP_REASON.NOT_CONFIGURED)
@@ -298,6 +301,10 @@ describe('runEngineFailover 引擎级超时', () => {
       timeoutMs: 40,
       translateWith: async (engine) => {
         calls.push(engine)
+        if (engine === 'thirdparty-ai') {
+          await delay(40)
+          throw new Error('引擎请求超时')
+        }
         return hang()
       },
       isCurrent: () => true,

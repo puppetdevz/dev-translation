@@ -3,6 +3,8 @@
  * 纯逻辑：window / 服务通过参数注入，便于隔离测试。
  */
 
+import { hasReadyThirdpartyAiGroup } from './thirdpartyAiGroups.js'
+
 export const ENGINE_DISPLAY_NAMES = {
   ai: 'uTools AI',
   'thirdparty-ai': '自定义 AI',
@@ -153,7 +155,7 @@ export function inspectEngine(engine, settings = {}, env = getRuntimeEnv()) {
       safeMessage: SAFE_MESSAGES.NOT_CONFIGURED,
     }
   }
-  if (engine === 'thirdparty-ai' && (isBlank(settings.thirdpartyAiUrl) || isBlank(settings.thirdpartyAiModel))) {
+  if (engine === 'thirdparty-ai' && !hasReadyThirdpartyAiGroup(settings, env)) {
     return {
       status: 'skipped',
       skipReason: SKIP_REASON.NOT_CONFIGURED,
@@ -303,6 +305,21 @@ function hasUsableTranslation(result) {
 }
 
 /**
+ * 自定义 AI 不套一级截止计时器。调用方（组链）必须自行按组超时并始终结算。
+ * 仍校验可用译文，并吞掉未处理拒绝。
+ */
+function callThirdpartyAiWithoutPrimaryTimeout(translateWith, engine) {
+  const callPromise = Promise.resolve().then(() => translateWith(engine))
+  callPromise.catch(() => {})
+  return callPromise.then((result) => {
+    if (!hasUsableTranslation(result)) {
+      throw new Error('引擎返回空结果')
+    }
+    return result
+  })
+}
+
+/**
  * 一次引擎尝试：调用 Promise 与截止计时器竞争，只结算一次。
  * 迟到的 resolve/reject 被吞掉，避免重复统计与未处理拒绝。
  */
@@ -382,7 +399,10 @@ export async function runEngineFailover({
     }
 
     try {
-      const result = await attemptEngineCall(translateWith, engine, budget)
+      // 自定义 AI 组链自管二级时限，不能被一级 timeoutMs 截断整条组链。
+      const result = engine === 'thirdparty-ai'
+        ? await callThirdpartyAiWithoutPrimaryTimeout(translateWith, engine)
+        : await attemptEngineCall(translateWith, engine, budget)
       if (typeof isCurrent === 'function' && !isCurrent()) {
         return { stale: true, outcomes }
       }

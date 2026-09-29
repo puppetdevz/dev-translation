@@ -11,7 +11,12 @@ import {
   getRuntimeEnv,
   runMainTextTranslation,
 } from './engineBridge.js'
-import { KNOWN_ENGINES, snapshotEngineTimeoutMs } from './storage.js'
+import { KNOWN_ENGINES, snapshotEngineTimeoutMs, snapshotThirdpartyAiTimeoutMs } from './storage.js'
+import {
+  runThirdpartyAiGroupFailover,
+  snapshotThirdpartyAiGroups,
+  createGroupRequest,
+} from './thirdpartyAiGroups.js'
 
 export const PROBE_NO_SUCCESS_MESSAGE = '无可用引擎，未调整顺序'
 
@@ -63,17 +68,20 @@ export function resolveProbeEngines(failoverOrder) {
   return result
 }
 
+function serializeGroups(groups) {
+  return (groups || []).map(g => `${g.id}\0${g.name}\0${g.url}\0${g.apiKey}\0${g.model}`).join('\n')
+}
+
 export function snapshotProbeConfig(settings) {
   const s = settings || {}
   return {
     failoverOrder: Array.isArray(s.failoverOrder) ? [...s.failoverOrder] : [],
     engineResponseTimeoutSeconds: s.engineResponseTimeoutSeconds,
+    thirdpartyAiFailoverTimeoutSeconds: s.thirdpartyAiFailoverTimeoutSeconds,
     deeplApiKey: s.deeplApiKey || '',
     deeplxServerUrl: s.deeplxServerUrl || '',
     deeplxToken: s.deeplxToken || '',
-    thirdpartyAiUrl: s.thirdpartyAiUrl || '',
-    thirdpartyAiKey: s.thirdpartyAiKey || '',
-    thirdpartyAiModel: s.thirdpartyAiModel || '',
+    thirdpartyAiGroups: snapshotThirdpartyAiGroups(s),
     thirdpartyAiSystemPrompt: s.thirdpartyAiSystemPrompt || '',
   }
 }
@@ -87,13 +95,12 @@ export function isProbeConfigUnchanged(snapshot, settings) {
   }
   return (
     snapshot.engineResponseTimeoutSeconds === current.engineResponseTimeoutSeconds
+    && snapshot.thirdpartyAiFailoverTimeoutSeconds === current.thirdpartyAiFailoverTimeoutSeconds
     && snapshot.deeplApiKey === current.deeplApiKey
     && snapshot.deeplxServerUrl === current.deeplxServerUrl
     && snapshot.deeplxToken === current.deeplxToken
-    && snapshot.thirdpartyAiUrl === current.thirdpartyAiUrl
-    && snapshot.thirdpartyAiKey === current.thirdpartyAiKey
-    && snapshot.thirdpartyAiModel === current.thirdpartyAiModel
     && snapshot.thirdpartyAiSystemPrompt === current.thirdpartyAiSystemPrompt
+    && serializeGroups(snapshot.thirdpartyAiGroups) === serializeGroups(current.thirdpartyAiGroups)
   )
 }
 
@@ -188,8 +195,7 @@ export function createProbeRunGuard() {
 export function formatProbeItemText(item) {
   if (!item || item.status === 'pending') return '测试中'
   if (item.status === 'success') {
-    const ms = Math.round(Number(item.durationMs))
-    return Number.isFinite(ms) ? `成功 ${ms} ms` : '成功'
+    return formatProbeSuccessText(item.durationMs, item.successGroupIndex)
   }
   if (item.status === 'skipped') return item.safeMessage || '已跳过'
   return item.safeMessage || '测试失败'
@@ -217,11 +223,13 @@ export async function callEngineProbe(engine, { text, settings = {}, env, timeou
     }
     case 'thirdparty-ai': {
       if (typeof services.requestThirdpartyAI !== 'function') throw new Error('翻译服务方法不可用')
+      const groups = snapshotThirdpartyAiGroups(settings)
+      const group = groups.find(g => g && String(g.url || '').trim() && String(g.apiKey || '').trim() && String(g.model || '').trim()) || groups[0] || {}
       const data = await services.requestThirdpartyAI(
-        settings.thirdpartyAiUrl,
-        settings.thirdpartyAiKey,
+        group.url,
+        group.apiKey,
         {
-          model: settings.thirdpartyAiModel,
+          model: group.model,
           messages: [{ role: 'user', content: prompt }],
           stream: false,
         },
@@ -276,6 +284,82 @@ function settleDuration(start, now) {
   return Number.isFinite(elapsed) ? Math.max(0, elapsed) : 0
 }
 
+function formatProbeSuccessText(durationMs, groupIndex) {
+  const ms = Math.round(Number(durationMs))
+  const timeText = Number.isFinite(ms) ? `成功 ${ms} ms` : '成功'
+  if (!Number.isInteger(groupIndex) || groupIndex < 0) return timeText
+  return `${timeText}（组 ${groupIndex + 1}）`
+}
+
+async function probeThirdpartyAiEngine({
+  settings,
+  env,
+  text,
+  now,
+  translateWith,
+  isCurrent,
+}) {
+  const groupTimeout = snapshotThirdpartyAiTimeoutMs(settings)
+  const start = now()
+  if (typeof translateWith === 'function') {
+    // 注入路径代表整引擎一次调用（测试用），用二级时限结算，不用一级时限截断。
+    const result = await attemptEngineCall(
+      () => translateWith('thirdparty-ai', text, groupTimeout),
+      'thirdparty-ai',
+      groupTimeout,
+    )
+    return {
+      status: 'success',
+      durationMs: settleDuration(start, now),
+      successGroupIndex: Number.isInteger(result && result.successGroupIndex) ? result.successGroupIndex : undefined,
+    }
+  }
+  const chain = await runThirdpartyAiGroupFailover({
+    groups: snapshotThirdpartyAiGroups(settings),
+    timeoutMs: groupTimeout,
+    env,
+    isCurrent,
+    requestGroup: createGroupRequest({
+      env,
+      includeSystemPrompt: false,
+      messages: [{ role: 'user', content: AI_PROMPT_PREFIX + text }],
+    }),
+  })
+  const durationMs = settleDuration(start, now)
+  if (chain && chain.stale) {
+    return { status: 'stale', durationMs }
+  }
+  if (chain && chain.success) {
+    return {
+      status: 'success',
+      durationMs,
+      successGroupIndex: chain.groupIndex,
+    }
+  }
+  if (chain && chain.allSkipped) {
+    const last = (chain.outcomes || []).find(o => o.status === 'skipped') || {}
+    return {
+      status: 'skipped',
+      durationMs: null,
+      skipReason: last.skipReason,
+      skipCategory: last.skipCategory,
+      category: last.category,
+      safeMessage: skipUserMessage(last),
+    }
+  }
+  const lastFail = [...(chain && chain.outcomes || [])].reverse().find(o => o.status === 'failure') || {}
+  const classified = lastFail.category
+    ? lastFail
+    : classifyError(new Error(chain && chain.message || '自定义 AI 调用失败'))
+  return {
+    status: 'failure',
+    durationMs,
+    category: classified.category,
+    statusCode: classified.statusCode,
+    safeMessage: classified.safeMessage,
+  }
+}
+
 /**
  * 并行探测：跳过不发请求；ready 引擎各一次真实调用，独立时限，只结算一次。
  */
@@ -313,6 +397,42 @@ export async function runBatchEngineProbe({
 
   await Promise.all(pendingIndexes.map(async (index) => {
     const engine = results[index].engine
+    if (engine === 'thirdparty-ai') {
+      try {
+        const probed = await probeThirdpartyAiEngine({
+          settings,
+          env: runtime,
+          text: probeText,
+          now,
+          translateWith,
+          isCurrent,
+        })
+        if (typeof isCurrent === 'function' && !isCurrent()) {
+          results[index] = { engine, status: 'stale', durationMs: probed.durationMs }
+          return
+        }
+        const item = { engine, ...probed }
+        results[index] = item
+        if (item.status !== 'stale') onItem?.(item)
+      } catch (err) {
+        const classified = classifyError(err)
+        const item = {
+          engine,
+          status: 'failure',
+          durationMs: null,
+          category: classified.category,
+          statusCode: classified.statusCode,
+          safeMessage: classified.safeMessage,
+        }
+        if (typeof isCurrent === 'function' && !isCurrent()) {
+          results[index] = { engine, status: 'stale', durationMs: null }
+          return
+        }
+        results[index] = item
+        onItem?.(item)
+      }
+      return
+    }
     let start = now()
     try {
       const caller = (target) => {
