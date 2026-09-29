@@ -27,6 +27,7 @@ function emptyStat() {
     skipped: 0,
     skipEnv: 0,
     skipConfig: 0,
+    skipInput: 0,
     recent: [],
     lastTime: 0,
     lastSuccess: 0,
@@ -49,6 +50,7 @@ export function normalizeEngineStat(raw) {
   s.skipped = toCount(raw.skipped)
   s.skipEnv = toCount(raw.skipEnv)
   s.skipConfig = toCount(raw.skipConfig)
+  s.skipInput = toCount(raw.skipInput)
   s.recent = Array.isArray(raw.recent) ? raw.recent.filter(v => v === 0 || v === 1) : []
   s.lastTime = toCount(raw.lastTime)
   s.lastSuccess = toCount(raw.lastSuccess)
@@ -112,7 +114,7 @@ export function recordEngineResult(engine, success) {
 /**
  * 记录一次跳过（未发真实网络请求）。不计入 total / recent / 成功率。
  * @param {string} engine
- * @param {'env'|'config'} category
+ * @param {'env'|'config'|'input'} category
  */
 export function recordEngineSkip(engine, category) {
   if (!engine) return
@@ -120,6 +122,7 @@ export function recordEngineSkip(engine, category) {
   const s = normalizeEngineStat(stats[engine])
   s.skipped += 1
   if (category === 'config') s.skipConfig += 1
+  else if (category === 'input') s.skipInput += 1
   else s.skipEnv += 1
   s.lastTime = Date.now()
   stats[engine] = s
@@ -175,6 +178,7 @@ export function computeStability(stat) {
     skipped,
     skipEnv: s.skipEnv || 0,
     skipConfig: s.skipConfig || 0,
+    skipInput: s.skipInput || 0,
     overallRate,
     recentRate,
     recentSamples,

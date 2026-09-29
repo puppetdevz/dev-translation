@@ -104,6 +104,17 @@ const engineMeta = {
   google: { brand: 'G', brandClass: 'brand-google', name: 'Google' },
   deepl: { brand: 'D', brandClass: 'brand-deepl', name: 'DeepL' },
   deeplx: { brand: 'X', brandClass: 'brand-deeplx', name: 'DeepLX' },
+  baidu: { brand: '百', brandClass: 'brand-baidu', name: '百度' },
+  aliyun: { brand: '阿', brandClass: 'brand-aliyun', name: '阿里' },
+  caiyun: { brand: '彩', brandClass: 'brand-caiyun', name: '彩云' },
+}
+
+const officialEngineConfigured = (engine) => {
+  const present = key => !!String(settings[key] || '').trim()
+  if (engine === 'baidu') return present('baiduAppId') && present('baiduSecret')
+  if (engine === 'aliyun') return present('aliyunAccessKeyId') && present('aliyunAccessKeySecret')
+  if (engine === 'caiyun') return present('caiyunToken')
+  return true
 }
 
 const mainEngine = computed(() => (settings.failoverOrder && settings.failoverOrder[0]) || 'ai')
@@ -189,6 +200,35 @@ const runEngineTest = async (engine) => {
       case 'deeplx':
         result = await window.services.deeplxTranslate(TEST_TEXT, 'en', 'zh-CN', settings.deeplxServerUrl, settings.deeplxToken)
         break
+      case 'baidu':
+        result = await window.services.baiduTranslate(
+          TEST_TEXT,
+          'en',
+          'zh-CN',
+          settingsSnap.baiduAppId,
+          settingsSnap.baiduSecret,
+          snapshotEngineTimeoutMs(settingsSnap),
+        )
+        break
+      case 'aliyun':
+        result = await window.services.aliyunTranslate(
+          TEST_TEXT,
+          'en',
+          'zh-CN',
+          settingsSnap.aliyunAccessKeyId,
+          settingsSnap.aliyunAccessKeySecret,
+          snapshotEngineTimeoutMs(settingsSnap),
+        )
+        break
+      case 'caiyun':
+        result = await window.services.caiyunTranslate(
+          TEST_TEXT,
+          'en',
+          'zh-CN',
+          settingsSnap.caiyunToken,
+          snapshotEngineTimeoutMs(settingsSnap),
+        )
+        break
       default:
         throw new Error('未知引擎')
     }
@@ -197,7 +237,9 @@ const runEngineTest = async (engine) => {
     testResult.value = {
       engine,
       ok: true,
-      message: successGroupName ? `连接正常（${successGroupName}）：${result}` : `连接正常：${result}`,
+      message: ['baidu', 'aliyun', 'caiyun'].includes(engine)
+        ? '连接正常（已取得非空译文）'
+        : (successGroupName ? `连接正常（${successGroupName}）：${result}` : `连接正常：${result}`),
     }
   } catch (err) {
     if (gen !== engineTestGen) return
@@ -229,6 +271,11 @@ watch(
     settings.thirdpartyAiSystemPrompt,
     settings.googleProxyEnabled,
     settings.googleProxyUrl,
+    settings.baiduAppId,
+    settings.baiduSecret,
+    settings.aliyunAccessKeyId,
+    settings.aliyunAccessKeySecret,
+    settings.caiyunToken,
   ],
   () => {
     if (probeRunning.value) probeStale = true
@@ -255,7 +302,7 @@ const runBatchProbe = async () => {
   const config = snapshotProbeConfig(settings)
   const timeoutMs = snapshotEngineTimeoutMs(config)
   const text = createProbeText()
-  probeResults.value = inspectProbeEngines(config, env)
+  probeResults.value = inspectProbeEngines(config, env, text)
   try {
     const out = await runBatchEngineProbe({
       settings: config,
@@ -352,6 +399,18 @@ const openDeeplSignup = () => {
 
 const openDeeplxGuide = () => {
   window.utools.shellOpenExternal('https://github.com/OwO-Network/DeepLX')
+}
+
+const openBaiduSignup = () => {
+  window.utools.shellOpenExternal('https://fanyi-api.baidu.com/product/113')
+}
+
+const openAliyunSignup = () => {
+  window.utools.shellOpenExternal('https://www.aliyun.com/product/alimt')
+}
+
+const openCaiyunSignup = () => {
+  window.utools.shellOpenExternal('https://platform.caiyunapp.com/regist')
 }
 
 const thirdpartyGroups = computed(() => Array.isArray(settings.thirdpartyAiGroups) ? settings.thirdpartyAiGroups : [])
@@ -565,6 +624,11 @@ const runGroupTest = async (groupId) => {
 const showDeeplApiKey = ref(false)
 // DeepLX 访问令牌显示/隐藏切换
 const showDeeplxToken = ref(false)
+const showBaiduAppId = ref(false)
+const showBaiduSecret = ref(false)
+const showAliyunId = ref(false)
+const showAliyunSecret = ref(false)
+const showCaiyunToken = ref(false)
 // DeepLX 复制成功反馈（短时高亮）
 const copiedDeeplxUrl = ref(false)
 
@@ -663,7 +727,7 @@ const currentOutputs = computed(() => {
 })
 
 // -- 日志管理 --
-const engineName = (e) => ({ ai:'uTools AI', 'thirdparty-ai':'自定义 AI', google:'Google 翻译', deepl:'DeepL 官方', deeplx:'DeepLX 自部署', system:'系统' })[e] || e
+const engineName = (e) => ({ ai:'uTools AI', 'thirdparty-ai':'自定义 AI', google:'Google 翻译', deepl:'DeepL 官方', deeplx:'DeepLX 自部署', baidu:'百度翻译', aliyun:'阿里翻译', caiyun:'彩云小译', system:'系统' })[e] || e
 
 const logs = ref([])
 const logCount = ref(0)
@@ -904,7 +968,7 @@ const handleRecentError = () => {
               class="probe-btn"
               :class="{ 'is-testing': probeRunning }"
               :disabled="probeRunning"
-              title="并行测试五个引擎，成功则按本轮耗时自动重排"
+              title="并行测试全部引擎，成功则按本轮耗时自动重排"
               @click="runBatchProbe"
             >
               <template v-if="!probeRunning">
@@ -957,6 +1021,7 @@ const handleRecentError = () => {
                 <span v-else class="brand-badge" :class="engineMeta[engine].brandClass">{{ engineMeta[engine].brand }}</span>
                 <div class="engine-card-info">
                   <span class="engine-card-name">{{ engineMeta[engine].name }}</span>
+                  <span v-if="!officialEngineConfigured(engine)" class="engine-card-unconfigured">未配置</span>
                 </div>
                 <span class="engine-priority">P{{ index + 1 }}</span>
               </div>
@@ -1000,6 +1065,55 @@ const handleRecentError = () => {
                       </button>
                     </div>
                     <p class="deepl-config-hint">地址与令牌分开填写，避免令牌明文暴露。在地址中粘贴 <code class="hint-code">https://host/TOKEN/translate</code> 会自动抽取令牌到上方。需完整链接时点地址右侧复制按钮即可获取含令牌的完整 URL。自部署 DeepLX：<a class="deepl-link" @click="openDeeplxGuide">部署指南</a></p>
+                  </div>
+                </template>
+                <template v-else-if="selectedEngine === 'baidu'">
+                  <div class="deepl-config" style="margin-top: 0;">
+                    <label class="deepl-config-label">APP ID</label>
+                    <div class="input-with-eye">
+                      <input class="deepl-api-input" :type="showBaiduAppId ? 'text' : 'password'" :value="settings.baiduAppId" @input="persistSetting('baiduAppId', $event.target.value)" placeholder="百度翻译开放平台 APP ID" />
+                      <button type="button" class="eye-toggle eye-toggle-text" :class="{ active: showBaiduAppId }" @click="showBaiduAppId = !showBaiduAppId" :title="showBaiduAppId ? '隐藏 APP ID' : '显示 APP ID'" :aria-label="showBaiduAppId ? '隐藏 APP ID' : '显示 APP ID'">{{ showBaiduAppId ? '隐' : '显' }}</button>
+                    </div>
+                    <label class="deepl-config-label" style="margin-top: 10px;">密钥</label>
+                    <div class="input-with-eye">
+                      <input class="deepl-api-input" :type="showBaiduSecret ? 'text' : 'password'" :value="settings.baiduSecret" @input="persistSetting('baiduSecret', $event.target.value)" placeholder="百度翻译密钥" />
+                      <button type="button" class="eye-toggle" :class="{ active: showBaiduSecret }" @click="showBaiduSecret = !showBaiduSecret" :title="showBaiduSecret ? '隐藏密钥' : '显示密钥'">
+                        <svg v-if="showBaiduSecret" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17.94 17.94A10.94 10.94 0 0 1 12 20c-7 0-10-8-10-8a18.45 18.45 0 0 1 5.06-5.94M9.9 4.24A10.94 10.94 0 0 1 12 4c7 0 10 8 10 8a18.5 18.5 0 0 1-2.16 3.19M9.9 9.9a3 3 0 0 1 4.2 4.2"/><line x1="2" y1="2" x2="22" y2="22"/></svg>
+                        <svg v-else viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M2 12s3-7 10-7 10 7 10 7-3 7-10 7-10-7-10-7z"/><circle cx="12" cy="12" r="3"/></svg>
+                      </button>
+                    </div>
+                    <p class="deepl-config-hint">标准版单次最多 1000 字符，超长将跳过本引擎。凭据仅保存在本机，缺项不会发请求。<a class="deepl-link" @click="openBaiduSignup">申请百度翻译 API</a></p>
+                  </div>
+                </template>
+                <template v-else-if="selectedEngine === 'aliyun'">
+                  <div class="deepl-config" style="margin-top: 0;">
+                    <label class="deepl-config-label">AccessKey ID</label>
+                    <div class="input-with-eye">
+                      <input class="deepl-api-input" :type="showAliyunId ? 'text' : 'password'" :value="settings.aliyunAccessKeyId" @input="persistSetting('aliyunAccessKeyId', $event.target.value)" placeholder="阿里云 AccessKey ID" />
+                      <button type="button" class="eye-toggle eye-toggle-text" :class="{ active: showAliyunId }" @click="showAliyunId = !showAliyunId" :title="showAliyunId ? '隐藏 ID' : '显示 ID'" :aria-label="showAliyunId ? '隐藏 ID' : '显示 ID'">{{ showAliyunId ? '隐' : '显' }}</button>
+                    </div>
+                    <label class="deepl-config-label" style="margin-top: 10px;">AccessKey Secret</label>
+                    <div class="input-with-eye">
+                      <input class="deepl-api-input" :type="showAliyunSecret ? 'text' : 'password'" :value="settings.aliyunAccessKeySecret" @input="persistSetting('aliyunAccessKeySecret', $event.target.value)" placeholder="阿里云 AccessKey Secret" />
+                      <button type="button" class="eye-toggle" :class="{ active: showAliyunSecret }" @click="showAliyunSecret = !showAliyunSecret" :title="showAliyunSecret ? '隐藏密钥' : '显示密钥'">
+                        <svg v-if="showAliyunSecret" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17.94 17.94A10.94 10.94 0 0 1 12 20c-7 0-10-8-10-8a18.45 18.45 0 0 1 5.06-5.94M9.9 4.24A10.94 10.94 0 0 1 12 4c7 0 10 8 10 8a18.5 18.5 0 0 1-2.16 3.19M9.9 9.9a3 3 0 0 1 4.2 4.2"/><line x1="2" y1="2" x2="22" y2="22"/></svg>
+                        <svg v-else viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M2 12s3-7 10-7 10 7 10 7-3 7-10 7-10-7-10-7z"/><circle cx="12" cy="12" r="3"/></svg>
+                      </button>
+                    </div>
+                    <p class="deepl-config-hint">需开通机器翻译并授予 <code class="hint-code">alimt:TranslateGeneral</code>。通用版单次最多 5000 字符，超长将跳过本引擎。凭据仅保存在本机。<a class="deepl-link" @click="openAliyunSignup">开通阿里云机器翻译</a></p>
+                  </div>
+                </template>
+                <template v-else-if="selectedEngine === 'caiyun'">
+                  <div class="deepl-config" style="margin-top: 0;">
+                    <label class="deepl-config-label">API Token</label>
+                    <div class="input-with-eye">
+                      <input class="deepl-api-input" :type="showCaiyunToken ? 'text' : 'password'" :value="settings.caiyunToken" @input="persistSetting('caiyunToken', $event.target.value)" placeholder="彩云开放平台 API Token" />
+                      <button type="button" class="eye-toggle" :class="{ active: showCaiyunToken }" @click="showCaiyunToken = !showCaiyunToken" :title="showCaiyunToken ? '隐藏 Token' : '显示 Token'">
+                        <svg v-if="showCaiyunToken" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17.94 17.94A10.94 10.94 0 0 1 12 20c-7 0-10-8-10-8a18.45 18.45 0 0 1 5.06-5.94M9.9 4.24A10.94 10.94 0 0 1 12 4c7 0 10 8 10 8a18.5 18.5 0 0 1-2.16 3.19M9.9 9.9a3 3 0 0 1 4.2 4.2"/><line x1="2" y1="2" x2="22" y2="22"/></svg>
+                        <svg v-else viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M2 12s3-7 10-7 10 7 10 7-3 7-10 7-10-7-10-7z"/><circle cx="12" cy="12" r="3"/></svg>
+                      </button>
+                    </div>
+                    <p class="deepl-config-hint">须使用开放平台申请的 API Token，普通会员账号不能代替 Token。凭据仅保存在本机，缺项不会发请求。<a class="deepl-link" @click="openCaiyunSignup">申请彩云小译 Token</a></p>
                   </div>
                 </template>
                 <template v-else-if="selectedEngine === 'thirdparty-ai'">
@@ -1152,6 +1266,7 @@ const handleRecentError = () => {
                 </template>
 
                 <div class="engine-test-block">
+                  <p v-if="!officialEngineConfigured(selectedEngine)" class="model-fetch-error">未配置完整凭据；该引擎会跳过，不发出翻译请求。</p>
                   <button
                     class="engine-test-btn"
                     :class="{ 'is-testing': testingEngine === selectedEngine }"
@@ -1199,7 +1314,7 @@ const handleRecentError = () => {
           :aria-hidden="activeCategory === 'advanced' ? 'false' : 'true'"
         >
             <h3 class="section-title">稳定性统计</h3>
-            <p class="section-hint">记录每次翻译引擎实际调用的成功/失败，跳过（未配置或服务未加载）单独计数且不计入成功率。与日志等级无关。</p>
+            <p class="section-hint">记录每次翻译引擎实际调用的成功/失败，跳过（未配置、服务未加载或文本超限）单独计数且不计入成功率。与日志等级无关。</p>
 
             <div class="stability-viewer">
               <div class="stability-viewer-header">
@@ -1230,7 +1345,7 @@ const handleRecentError = () => {
                     <span class="stability-stat stability-stat-failure">失败 {{ item.metrics.failure }}</span>
                     <span
                       class="stability-stat stability-stat-skip"
-                      :title="'环境 ' + item.metrics.skipEnv + ' / 配置 ' + item.metrics.skipConfig"
+                      :title="'环境 ' + item.metrics.skipEnv + ' / 配置 ' + item.metrics.skipConfig + ' / 超长 ' + item.metrics.skipInput"
                     >跳过 {{ item.metrics.skipped }}</span>
                     <span v-if="item.metrics.hasData && item.metrics.recentSamples >= 5" class="stability-stat-recent">
                       近期 {{ pct(item.metrics.recentRate) }}
@@ -1614,6 +1729,9 @@ const handleRecentError = () => {
 .brand-google { background: #4285F4; }
 .brand-deepl { background: #0F2B46; }
 .brand-deeplx { background: #f97316; }
+.brand-baidu { background: #2932E1; }
+.brand-aliyun { background: #FF6A00; }
+.brand-caiyun { background: #0D9488; }
 
 .engine-card-info {
   flex: 1;
@@ -1627,6 +1745,12 @@ const handleRecentError = () => {
   font-size: 13px;
   font-weight: 600;
   color: var(--text-primary, #1e293b);
+}
+
+.engine-card-unconfigured {
+  flex-shrink: 0;
+  font-size: 10px;
+  color: var(--text-secondary, #64748b);
 }
 
 /* 故障转移优先级徽章：P1=主引擎，与 P2+ 样式一致 */
@@ -2114,6 +2238,14 @@ const handleRecentError = () => {
   width: 18px;
   height: 18px;
   display: block;
+}
+
+.eye-toggle-text {
+  min-width: 28px;
+  min-height: 28px;
+  font-size: 11px;
+  font-weight: 600;
+  line-height: 1;
 }
 
 /* DeepLX 地址复制按钮：复用 eye-toggle 布局，复制成功时绿色高亮 */

@@ -15,6 +15,11 @@ const {
   setAllowedGoogleHostsForTest,
   restoreAllowedGoogleHosts,
 } = require('./googleTransport')
+const {
+  translateWithBaidu,
+  translateWithAliyun,
+  translateWithCaiyun,
+} = require('./officialEngines')
 
 // google-translate-api-x 为可选源：安装包若未带上该依赖，不得阻断整个 window.services 初始化。
 let googleLibrary = null
@@ -832,14 +837,16 @@ function getOrCreateGoogleInflight(cacheKey, text, from, to, hasBudget, waiterDe
     const left = shared.deadline - Date.now()
     return left > 0 ? left : 0
   }
-  shared.promise = translateWithSources(text, from, to, {
+  // 等同一 tick 的等待者先加入并扩展共享预算，避免首位短预算在后续等待者登记前
+  // 固定了单源切片（后续长预算等待者会被错误地一起超时）。
+  shared.promise = Promise.resolve().then(() => translateWithSources(text, from, to, {
     getRemaining,
     shareBudget: true,
     signal: shared.controller.signal,
     shouldStop: () => shared.aborted,
     proxyEnabled: shared.proxyEnabled,
     proxyUrl: shared.proxyUrl,
-  }).then((result) => {
+  })).then((result) => {
     if (shared.cacheAllowed && !shared.aborted && result) {
       setCache(cacheKey, result)
     }
@@ -905,6 +912,15 @@ window.services = {
   },
   deeplxTranslate (text, from, to, serverUrl, token, timeoutMs) {
     return translateWithDeepLX(text, from, to, serverUrl, token, timeoutMs)
+  },
+  baiduTranslate (text, from, to, appid, secret, timeoutMs) {
+    return translateWithBaidu(text, from, to, appid, secret, timeoutMs)
+  },
+  aliyunTranslate (text, from, to, accessKeyId, accessKeySecret, timeoutMs) {
+    return translateWithAliyun(text, from, to, accessKeyId, accessKeySecret, timeoutMs)
+  },
+  caiyunTranslate (text, from, to, token, timeoutMs) {
+    return translateWithCaiyun(text, from, to, token, timeoutMs)
   },
   requestThirdpartyAI (url, apiKey, body, timeoutMs) {
     // 用户只需填到 /v1，这里自动补全 /chat/completions（向下兼容已填完整路径）

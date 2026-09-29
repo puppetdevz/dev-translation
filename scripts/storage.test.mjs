@@ -67,7 +67,7 @@ describe('loadSettings 超时字段', () => {
     assert.equal(s.engineResponseTimeoutSeconds, 5)
     assert.equal(s.deeplApiKey, 'keep-key')
     assert.equal(s.logLevel, 'debug')
-    assert.deepEqual(s.failoverOrder, ['google', 'ai', 'thirdparty-ai', 'deepl', 'deeplx'])
+    assert.deepEqual(s.failoverOrder, ['google', 'ai', 'thirdparty-ai', 'deepl', 'deeplx', 'baidu', 'aliyun', 'caiyun'])
   })
 
   it('存储为空值、小数、0、负数、61、非数字时回退 5 秒且不丢其它字段', () => {
@@ -124,12 +124,96 @@ describe('loadSettings 超时字段', () => {
     }
   })
 
+  it('读取 dbStorage 出错时不打印可能携带凭据的异常正文', () => {
+    const originalGet = window.utools.dbStorage.getItem
+    const originalError = console.error
+    const messages = []
+    window.utools.dbStorage.getItem = () => { throw new Error('sensitive-token-abc') }
+    console.error = (...parts) => messages.push(parts.join(' '))
+    try {
+      const s = loadSettings()
+      assert.deepEqual(s.failoverOrder, DEFAULT_SETTINGS.failoverOrder)
+      assert.equal(messages.length, 1)
+      assert.equal(messages[0].includes('sensitive-token-abc'), false)
+    } finally {
+      window.utools.dbStorage.getItem = originalGet
+      console.error = originalError
+    }
+  })
+
   it('整个存储 JSON 损坏时回退默认设置', () => {
     store[STORAGE_KEY] = '{not-json'
     const s = loadSettings()
     assert.equal(s.engineResponseTimeoutSeconds, 5)
     assert.deepEqual(s.failoverOrder, DEFAULT_SETTINGS.failoverOrder)
     assert.equal(s.deeplApiKey, '')
+    assert.equal(s.baiduAppId, '')
+    assert.equal(s.aliyunAccessKeyId, '')
+    assert.equal(s.caiyunToken, '')
+  })
+})
+
+describe('百度/阿里/彩云引擎升级迁移', () => {
+  beforeEach(() => {
+    for (const k of Object.keys(store)) delete store[k]
+  })
+
+  it('新装默认旧五引擎在前，末尾按百度→阿里→彩云',
+    () => {
+      const s = loadSettings()
+      assert.deepEqual(s.failoverOrder, ['ai', 'thirdparty-ai', 'google', 'deepl', 'deeplx', 'baidu', 'aliyun', 'caiyun'])
+      assert.equal(s.baiduAppId, '')
+      assert.equal(s.baiduSecret, '')
+      assert.equal(s.aliyunAccessKeyId, '')
+      assert.equal(s.aliyunAccessKeySecret, '')
+      assert.equal(s.caiyunToken, '')
+    })
+
+  it('旧五引擎自定义顺序升级时保留首位与相对顺序，仅末尾补新引擎各一次',
+    () => {
+      store[STORAGE_KEY] = JSON.stringify({
+        failoverOrder: ['google', 'deepl', 'ai', 'thirdparty-ai', 'deeplx'],
+        deeplApiKey: 'keep-key',
+      })
+      const s = loadSettings()
+      assert.deepEqual(s.failoverOrder, ['google', 'deepl', 'ai', 'thirdparty-ai', 'deeplx', 'baidu', 'aliyun', 'caiyun'])
+      assert.equal(s.deeplApiKey, 'keep-key')
+      const again = loadSettings()
+      assert.deepEqual(again.failoverOrder, s.failoverOrder)
+    })
+
+  it('已含新引擎时不再追加，重复项只保留一次',
+    () => {
+      store[STORAGE_KEY] = JSON.stringify({
+        failoverOrder: ['baidu', 'google', 'baidu', 'aliyun', 'unknown', 'caiyun', 'deepl'],
+      })
+      const s = loadSettings()
+      assert.deepEqual(s.failoverOrder, ['baidu', 'google', 'aliyun', 'caiyun', 'deepl', 'deeplx', 'thirdparty-ai'])
+      assert.equal(s.failoverOrder.filter(e => e === 'baidu').length, 1)
+      const again = loadSettings()
+      assert.deepEqual(again.failoverOrder, s.failoverOrder)
+    })
+
+  it('旧 deeplMode=deeplx 迁移保留主引擎且最终顺序去重', () => {
+    store[STORAGE_KEY] = JSON.stringify({
+      failoverOrder: ['deepl', 'ai', 'google'],
+      deeplMode: 'deeplx',
+    })
+    const s = loadSettings()
+    assert.equal(s.failoverOrder[0], 'deeplx')
+    assert.equal(s.failoverOrder.filter(e => e === 'deepl').length, 1)
+    assert.equal(s.failoverOrder.filter(e => e === 'deeplx').length, 1)
+    assert.deepEqual(s.failoverOrder.slice(-3), ['baidu', 'aliyun', 'caiyun'])
+    assert.equal(s.deeplMode, undefined)
+  })
+
+  it('全未知引擎回退默认列表；旧配置缺 ai 时不改主引擎', () => {
+    store[STORAGE_KEY] = JSON.stringify({ failoverOrder: ['unknown', 'obsolete'] })
+    assert.deepEqual(loadSettings().failoverOrder, DEFAULT_SETTINGS.failoverOrder)
+    store[STORAGE_KEY] = JSON.stringify({ failoverOrder: ['google', 'baidu', 'google'] })
+    const s = loadSettings()
+    assert.equal(s.failoverOrder[0], 'google')
+    assert.equal(s.failoverOrder.filter(e => e === 'google').length, 1)
   })
 })
 

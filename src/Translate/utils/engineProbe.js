@@ -4,7 +4,7 @@
  */
 
 import {
-  inspectEngine,
+  inspectEngineForCall,
   classifyError,
   skipUserMessage,
   attemptEngineCall,
@@ -46,7 +46,7 @@ export function createProbeText(now = Date.now(), nonce = Math.random()) {
 }
 
 /**
- * 测试覆盖五个已知引擎：先保留当前 failoverOrder 中的合法项，缺项按白名单补在尾部。
+ * 测试覆盖全部已知引擎：先保留当前 failoverOrder 中的合法项，缺项按白名单补在尾部。
  */
 export function resolveProbeEngines(failoverOrder) {
   const seen = new Set()
@@ -85,6 +85,11 @@ export function snapshotProbeConfig(settings) {
     thirdpartyAiSystemPrompt: s.thirdpartyAiSystemPrompt || '',
     googleProxyEnabled: !!s.googleProxyEnabled,
     googleProxyUrl: s.googleProxyUrl || '',
+    baiduAppId: s.baiduAppId || '',
+    baiduSecret: s.baiduSecret || '',
+    aliyunAccessKeyId: s.aliyunAccessKeyId || '',
+    aliyunAccessKeySecret: s.aliyunAccessKeySecret || '',
+    caiyunToken: s.caiyunToken || '',
   }
 }
 
@@ -104,6 +109,11 @@ export function isProbeConfigUnchanged(snapshot, settings) {
     && snapshot.thirdpartyAiSystemPrompt === current.thirdpartyAiSystemPrompt
     && snapshot.googleProxyEnabled === current.googleProxyEnabled
     && snapshot.googleProxyUrl === current.googleProxyUrl
+    && snapshot.baiduAppId === current.baiduAppId
+    && snapshot.baiduSecret === current.baiduSecret
+    && snapshot.aliyunAccessKeyId === current.aliyunAccessKeyId
+    && snapshot.aliyunAccessKeySecret === current.aliyunAccessKeySecret
+    && snapshot.caiyunToken === current.caiyunToken
     && serializeGroups(snapshot.thirdpartyAiGroups) === serializeGroups(current.thirdpartyAiGroups)
   )
 }
@@ -120,9 +130,9 @@ function skippedItem(engine, inspection) {
   }
 }
 
-export function inspectProbeEngines(settings = {}, env = getRuntimeEnv()) {
+export function inspectProbeEngines(settings = {}, env = getRuntimeEnv(), text) {
   return resolveProbeEngines(settings.failoverOrder).map((engine) => {
-    const inspection = inspectEngine(engine, settings, env)
+    const inspection = inspectEngineForCall(engine, settings, env, text)
     if (inspection.status === 'skipped') return skippedItem(engine, inspection)
     return { engine, status: 'pending', durationMs: null, safeMessage: '' }
   })
@@ -279,6 +289,53 @@ export async function callEngineProbe(engine, { text, settings = {}, env, timeou
         'zh-CN',
       )
     }
+    case 'baidu': {
+      if (typeof services.baiduTranslate !== 'function') throw new Error('翻译服务方法不可用')
+      return runMainTextTranslation(
+        (value, from, to) => services.baiduTranslate(
+          value,
+          from,
+          to,
+          settings.baiduAppId,
+          settings.baiduSecret,
+          timeoutMs,
+        ),
+        text,
+        'en',
+        'zh-CN',
+      )
+    }
+    case 'aliyun': {
+      if (typeof services.aliyunTranslate !== 'function') throw new Error('翻译服务方法不可用')
+      return runMainTextTranslation(
+        (value, from, to) => services.aliyunTranslate(
+          value,
+          from,
+          to,
+          settings.aliyunAccessKeyId,
+          settings.aliyunAccessKeySecret,
+          timeoutMs,
+        ),
+        text,
+        'en',
+        'zh-CN',
+      )
+    }
+    case 'caiyun': {
+      if (typeof services.caiyunTranslate !== 'function') throw new Error('翻译服务方法不可用')
+      return runMainTextTranslation(
+        (value, from, to) => services.caiyunTranslate(
+          value,
+          from,
+          to,
+          settings.caiyunToken,
+          timeoutMs,
+        ),
+        text,
+        'en',
+        'zh-CN',
+      )
+    }
     default:
       throw new Error('未知引擎')
   }
@@ -386,7 +443,7 @@ export async function runBatchEngineProbe({
   const originalOrder = Array.isArray(settings.failoverOrder) ? [...settings.failoverOrder] : []
 
   const results = engines.map((engine) => {
-    const inspection = inspectEngine(engine, settings, runtime)
+    const inspection = inspectEngineForCall(engine, settings, runtime, probeText)
     if (inspection.status === 'skipped') {
       const item = skippedItem(engine, inspection)
       onItem?.(item)

@@ -59,6 +59,39 @@ describe('sanitizeLogEntry', () => {
     assert.equal(entry.message.includes('524'), true)
   })
 
+  it('保留输入超限跳过类别，丢弃原文', () => {
+    const entry = sanitizeLogEntry({
+      id: '3',
+      timestamp: 3,
+      level: 'warn',
+      engine: 'baidu',
+      message: '文本超过该引擎单次限制',
+      category: 'input_limit',
+      skipReason: 'input_limit',
+      skipCategory: 'input',
+      phase: 'skip',
+      detail: '原文 Hello secret',
+    })
+    assert.equal(entry.category, 'input_limit')
+    assert.equal(entry.skipReason, 'input_limit')
+    assert.equal(entry.skipCategory, 'input')
+    assert.equal(JSON.stringify(entry).includes('Hello secret'), false)
+  })
+
+  it('厂商业务失败只保留类别，不保留未经净化的响应', () => {
+    const item = sanitizeLogEntry({
+      engine: 'aliyun',
+      category: 'quota_error',
+      message: '响应正文 token=secret-text',
+      phase: 'call',
+      response: { SourceText: '机密原文' },
+    })
+    assert.equal(item.category, 'quota_error')
+    assert.equal(item.message, '引擎额度不足或服务未开通')
+    assert.equal(JSON.stringify(item).includes('secret-text'), false)
+    assert.equal(JSON.stringify(item).includes('机密原文'), false)
+  })
+
   it('保留 Google 来源/路径/分源摘要，丢弃代理地址与 URL', () => {
     const entry = sanitizeLogEntry({
       id: 'g1',

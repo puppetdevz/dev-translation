@@ -135,7 +135,7 @@ export const DEFAULT_SETTINGS = {
   showContextNote: true,        // 显示上下文说明
   detectionStrategy: 'regex',   // 语言检测策略: 'regex' | 'ai'
   translationEngine: 'ai',     // 主翻译引擎（兼容旧版本，实际主引擎由 failoverOrder[0] 决定）
-  failoverOrder: ['ai', 'thirdparty-ai', 'google', 'deepl', 'deeplx'], // 自动故障转移顺序: 所有引擎的有序列表，首位为主引擎，翻译失败时按此顺序依次重试。deepl=官方 API，deeplx=自部署/公共实例
+  failoverOrder: ['ai', 'thirdparty-ai', 'google', 'deepl', 'deeplx', 'baidu', 'aliyun', 'caiyun'], // 自动故障转移顺序: 所有引擎的有序列表，首位为主引擎，翻译失败时按此顺序依次重试。deepl=官方 API，deeplx=自部署/公共实例；新增官方引擎追加在旧五引擎之后
   engineResponseTimeoutSeconds: ENGINE_RESPONSE_TIMEOUT_DEFAULT, // 每个已调用翻译引擎取得主译文的时限（秒），超时视为失败并尝试下一引擎
   deeplApiKey: '',              // DeepL 官方 API Key（Free 版以 :fx 结尾，注册地址 https://www.deepl.com/pro-api）
   deeplxServerUrl: '',          // DeepLX 服务器地址（如 http://localhost:1188）
@@ -147,10 +147,43 @@ export const DEFAULT_SETTINGS = {
   logRetentionDays: 7,              // 日志保留天数: 1/3/7/0(永久)，到期自动清理；始终受最大条数封顶
   googleProxyEnabled: false,        // Google 专用 HTTP(S) CONNECT 代理，默认关闭
   googleProxyUrl: '',               // 用户自填、无认证的 http:// 或 https:// 代理地址
+  baiduAppId: '',                   // 百度翻译开放平台 APP ID
+  baiduSecret: '',                  // 百度翻译密钥
+  aliyunAccessKeyId: '',            // 阿里云 AccessKey ID（需 alimt:TranslateGeneral）
+  aliyunAccessKeySecret: '',        // 阿里云 AccessKey Secret
+  caiyunToken: '',                  // 彩云开放平台 API Token
 }
 
 // 已知引擎白名单：loadSettings 会用它过滤 failoverOrder，剔除未知/废弃的引擎标识，防止渲染时 engineMeta[engine] 为 undefined 致白屏
-export const KNOWN_ENGINES = ['ai', 'thirdparty-ai', 'google', 'deepl', 'deeplx']
+export const KNOWN_ENGINES = ['ai', 'thirdparty-ai', 'google', 'deepl', 'deeplx', 'baidu', 'aliyun', 'caiyun']
+
+// 升级时仅把缺失的新引擎按该顺序补到末尾，不打乱用户已有相对顺序
+export const APPENDED_ENGINES = ['baidu', 'aliyun', 'caiyun']
+
+function dedupeKnownEngines(order) {
+  const seen = new Set()
+  const result = []
+  if (!Array.isArray(order)) return result
+  for (const engine of order) {
+    if (KNOWN_ENGINES.includes(engine) && !seen.has(engine)) {
+      seen.add(engine)
+      result.push(engine)
+    }
+  }
+  return result
+}
+
+function appendMissingEngines(order, extras) {
+  const next = dedupeKnownEngines(order)
+  const seen = new Set(next)
+  for (const engine of extras || []) {
+    if (KNOWN_ENGINES.includes(engine) && !seen.has(engine)) {
+      seen.add(engine)
+      next.push(engine)
+    }
+  }
+  return next
+}
 
 /**
  * 加载设置
@@ -169,17 +202,20 @@ export const loadSettings = () => {
         const main = merged.translationEngine || 'ai'
         merged.failoverOrder = [main, ...['ai', 'thirdparty-ai', 'google', 'deepl', 'deeplx'].filter(e => e !== main)]
       }
+      // 白名单过滤：剔除未知引擎标识（防止旧版残留或外部手动写入的未知值导致 SettingsPage 渲染白屏）
+      merged.failoverOrder = merged.failoverOrder.filter(e => KNOWN_ENGINES.includes(e))
+      // 非空但全为未知标识时须回退默认，不可只剩迁移时补入的引擎。
+      if (merged.failoverOrder.length === 0) merged.failoverOrder = [...DEFAULT_SETTINGS.failoverOrder]
       // 兼容旧 failoverOrder 无 thirdparty-ai：在 ai 之后插入
-      if (Array.isArray(merged.failoverOrder) && !merged.failoverOrder.includes('thirdparty-ai')) {
+      if (!merged.failoverOrder.includes('thirdparty-ai')) {
         const aiIdx = merged.failoverOrder.indexOf('ai')
         if (aiIdx >= 0) {
           merged.failoverOrder.splice(aiIdx + 1, 0, 'thirdparty-ai')
         } else {
-          merged.failoverOrder.unshift('thirdparty-ai')
+          // 没有 ai 时仍保留原首位（用户手动选定的主引擎）。
+          merged.failoverOrder.push('thirdparty-ai')
         }
       }
-      // 白名单过滤：剔除未知引擎标识（防止旧版残留或外部手动写入的未知值导致 SettingsPage 渲染白屏）
-      merged.failoverOrder = merged.failoverOrder.filter(e => KNOWN_ENGINES.includes(e))
       // DeepL 引擎拆分迁移：旧版用 deeplMode 区分 official/deeplx，新版拆分为两个独立顶级引擎
       // merged.deeplMode 来自旧配置的 spread（DEFAULT_SETTINGS 已移除该字段，仅作迁移判断用）
       if (Array.isArray(merged.failoverOrder)) {
@@ -200,7 +236,8 @@ export const loadSettings = () => {
         if (!merged.failoverOrder.includes('deepl')) {
           const deeplxIdx = merged.failoverOrder.indexOf('deeplx')
           if (deeplxIdx >= 0) {
-            merged.failoverOrder.splice(deeplxIdx, 0, 'deepl')
+            // DeepLX 为首位时仍应是主引擎。
+            merged.failoverOrder.splice(deeplxIdx === 0 ? 1 : deeplxIdx, 0, 'deepl')
           } else {
             merged.failoverOrder.push('deepl')
           }
@@ -212,6 +249,8 @@ export const loadSettings = () => {
       if (merged.failoverOrder.length === 0) {
         merged.failoverOrder = [...DEFAULT_SETTINGS.failoverOrder]
       }
+      // 升级补全：保留原主引擎与相对顺序，仅把缺失的百度/阿里/彩云按固定顺序追加末尾；去重保持幂等
+      merged.failoverOrder = appendMissingEngines(merged.failoverOrder, APPENDED_ENGINES)
       merged.engineResponseTimeoutSeconds = normalizeEngineResponseTimeoutSeconds(
         merged.engineResponseTimeoutSeconds
       )
@@ -230,8 +269,9 @@ export const loadSettings = () => {
       }
       return cloneSettings(merged)
     }
-  } catch (error) {
-    console.error('加载设置失败:', error)
+  } catch {
+    // dbStorage 异常或不合法数据可能包含本机凭据，只输出固定提示。
+    console.error('加载设置失败')
   }
   return cloneSettings(DEFAULT_SETTINGS)
 }
@@ -245,7 +285,7 @@ export const saveSettings = (settings) => {
   try {
     const payload = { ...settings }
     if (Array.isArray(settings && settings.failoverOrder)) {
-      payload.failoverOrder = [...settings.failoverOrder]
+      payload.failoverOrder = dedupeKnownEngines(settings.failoverOrder)
     }
     if (Array.isArray(settings && settings.thirdpartyAiGroups)) {
       payload.thirdpartyAiGroups = cloneGroups(settings.thirdpartyAiGroups)

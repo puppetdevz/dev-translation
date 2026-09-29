@@ -63,6 +63,9 @@ const PRELOAD_SERVICES = {
   googleTranslate: async () => 'ok',
   deeplTranslate: async () => 'ok',
   deeplxTranslate: async () => 'ok',
+  baiduTranslate: async () => 'ok',
+  aliyunTranslate: async () => 'ok',
+  caiyunTranslate: async () => 'ok',
   requestThirdpartyAI: async () => ({ choices: [{ message: { content: 'ok' } }] }),
 }
 
@@ -86,10 +89,16 @@ describe('createProbeText', () => {
 })
 
 describe('resolveProbeEngines', () => {
-  it('始终覆盖五个已知引擎，缺项按 KNOWN_ENGINES 补在尾部', () => {
-    assert.deepEqual(resolveProbeEngines(['google']), ['google', 'ai', 'thirdparty-ai', 'deepl', 'deeplx'])
+  it('始终覆盖全部已知引擎，缺项按 KNOWN_ENGINES 补在尾部', () => {
+    assert.deepEqual(
+      resolveProbeEngines(['google']),
+      ['google', 'ai', 'thirdparty-ai', 'deepl', 'deeplx', 'baidu', 'aliyun', 'caiyun'],
+    )
     assert.deepEqual(resolveProbeEngines(KNOWN_ENGINES), KNOWN_ENGINES)
-    assert.deepEqual(resolveProbeEngines(['deepl', 'ai', 'unknown']), ['deepl', 'ai', 'thirdparty-ai', 'google', 'deeplx'])
+    assert.deepEqual(
+      resolveProbeEngines(['deepl', 'ai', 'unknown']),
+      ['deepl', 'ai', 'thirdparty-ai', 'google', 'deeplx', 'baidu', 'aliyun', 'caiyun'],
+    )
     assert.deepEqual(resolveProbeEngines(null), [...KNOWN_ENGINES])
   })
 })
@@ -106,7 +115,7 @@ describe('sortByProbeResults', () => {
     ]
     assert.deepEqual(
       sortByProbeResults(original, results),
-      ['deepl', 'google', 'ai', 'deeplx', 'thirdparty-ai']
+      ['deepl', 'google', 'ai', 'deeplx', 'thirdparty-ai', 'baidu', 'aliyun', 'caiyun']
     )
   })
 
@@ -119,7 +128,7 @@ describe('sortByProbeResults', () => {
     ]
     assert.deepEqual(
       sortByProbeResults(original, results),
-      ['deepl', 'google', 'ai', 'thirdparty-ai', 'deeplx']
+      ['deepl', 'google', 'ai', 'thirdparty-ai', 'deeplx', 'baidu', 'aliyun', 'caiyun']
     )
   })
 
@@ -157,6 +166,9 @@ describe('snapshotProbeConfig / isProbeConfigUnchanged', () => {
       googleProxyEnabled: true,
       googleProxyUrl: 'http://127.0.0.1:7890',
     }), false)
+    assert.equal(isProbeConfigUnchanged(snap, { ...CONFIGURED, baiduAppId: 'other' }), false)
+    assert.equal(isProbeConfigUnchanged(snap, { ...CONFIGURED, aliyunAccessKeySecret: 'other' }), false)
+    assert.equal(isProbeConfigUnchanged(snap, { ...CONFIGURED, caiyunToken: 'other' }), false)
   })
 })
 
@@ -230,7 +242,7 @@ describe('createProbeRunGuard', () => {
 describe('inspectProbeEngines', () => {
   it('未配置或缺桥接标记跳过且不进入 pending', () => {
     const items = inspectProbeEngines({ failoverOrder: KNOWN_ENGINES }, { services: undefined, utools: {} })
-    assert.equal(items.length, 5)
+    assert.equal(items.length, 8)
     assert.ok(items.every(i => i.status === 'skipped'))
     assert.equal(items.find(i => i.engine === 'google').skipReason, SKIP_REASON.BRIDGE_MISSING)
     assert.equal(items.find(i => i.engine === 'ai').skipReason, SKIP_REASON.METHOD_MISSING)
@@ -242,7 +254,7 @@ describe('runBatchEngineProbe', () => {
     for (const k of Object.keys(store)) delete store[k]
   })
 
-  it('一次覆盖五个引擎：跳过不发请求，ready 各请求一次', async () => {
+  it('一次覆盖全部引擎：跳过不发请求，ready 各请求一次', async () => {
     const calls = []
     const settings = {
       ...CONFIGURED,
@@ -259,14 +271,57 @@ describe('runBatchEngineProbe', () => {
         return { translation: `ok-${engine}` }
       },
     })
-    assert.equal(out.results.length, 5)
+    assert.equal(out.results.length, 8)
     const byEngine = Object.fromEntries(out.results.map(r => [r.engine, r]))
     assert.equal(byEngine.deepl.status, 'skipped')
     assert.equal(byEngine.deepl.skipCategory, SKIP_CATEGORY.CONFIG)
+    assert.equal(byEngine.baidu.status, 'skipped')
+    assert.equal(byEngine.aliyun.skipReason, SKIP_REASON.NOT_CONFIGURED)
     assert.deepEqual(calls.map(c => c.engine).sort(), ['ai', 'deeplx', 'google', 'thirdparty-ai'])
     assert.ok(calls.every(c => c.text === 'Hello World probe-1'))
     assert.equal(out.hadSuccess, true)
   })
+
+  it('超长文本对百度/阿里记输入跳过且不请求，彩云不自设阈值',
+    async () => {
+      const calls = []
+      const settings = {
+        ...CONFIGURED,
+        baiduAppId: 'id',
+        baiduSecret: 's',
+        aliyunAccessKeyId: 'ak',
+        aliyunAccessKeySecret: 'sk',
+        caiyunToken: 'tok',
+      }
+      const out = await runBatchEngineProbe({
+        settings,
+        env: READY_ENV,
+        timeoutMs: 80,
+        text: 'x'.repeat(1001),
+        translateWith: async (engine, text) => {
+          calls.push({ engine, text })
+          return { translation: 'ok' }
+        },
+      })
+      const byEngine = Object.fromEntries(out.results.map(r => [r.engine, r]))
+      assert.equal(byEngine.baidu.status, 'skipped')
+      assert.equal(byEngine.baidu.skipReason, SKIP_REASON.INPUT_LIMIT)
+      assert.equal(byEngine.baidu.skipCategory, SKIP_CATEGORY.INPUT)
+      assert.equal(calls.some(c => c.engine === 'baidu'), false)
+      assert.equal(byEngine.aliyun.status, 'success')
+      assert.equal(calls.some(c => c.engine === 'caiyun'), true)
+      const longAliyun = await runBatchEngineProbe({
+        settings,
+        env: READY_ENV,
+        timeoutMs: 80,
+        text: 'x'.repeat(5001),
+        translateWith: async (engine) => {
+          if (engine === 'aliyun') throw new Error('should not call aliyun')
+          return { translation: 'ok' }
+        },
+      })
+      assert.equal(longAliyun.results.find(r => r.engine === 'aliyun').skipReason, SKIP_REASON.INPUT_LIMIT)
+    })
 
   it('并行结算：挂起引擎不拖死其他项，整轮约一个时限结束', async () => {
     const calls = []
@@ -379,7 +434,7 @@ describe('runBatchEngineProbe', () => {
     })
     assert.equal(out.hadSuccess, false)
     assert.deepEqual(out.nextOrder, original)
-    assert.equal(out.results.length, 5)
+    assert.equal(out.results.length, 8)
     assert.ok(out.results.every(r => r.status === 'skipped'))
   })
 
@@ -419,6 +474,45 @@ describe('runBatchEngineProbe', () => {
     const decision = applyProbeOrder({
       hadSuccess: out.hadSuccess,
       stale: stale || !isProbeConfigUnchanged(snapshot, current),
+      leftPage: false,
+      nextOrder: out.nextOrder,
+      persistOrder: () => { saved = true; return true },
+    })
+    assert.equal(decision.reason, PROBE_APPLY.STALE)
+    assert.equal(saved, false)
+  })
+
+  it('新增凭据在测试途中变化使旧轮失效，不落盘旧排序', async () => {
+    const current = {
+      ...CONFIGURED,
+      baiduAppId: 'app',
+      baiduSecret: 'secret',
+      aliyunAccessKeyId: 'ak',
+      aliyunAccessKeySecret: 'sk',
+      caiyunToken: 'token',
+    }
+    const snapshot = snapshotProbeConfig(current)
+    let finish
+    const pending = new Promise(resolve => { finish = resolve })
+    const run = runBatchEngineProbe({
+      settings: snapshot,
+      env: READY_ENV,
+      text: 'Hello World',
+      timeoutMs: 100,
+      translateWith: async () => {
+        await pending
+        return { translation: 'ok' }
+      },
+    })
+    current.caiyunToken = 'new-token'
+    assert.equal(isProbeConfigUnchanged(snapshot, current), false)
+    finish()
+    const out = await run
+    assert.equal(out.hadSuccess, true)
+    let saved = false
+    const decision = applyProbeOrder({
+      hadSuccess: out.hadSuccess,
+      stale: !isProbeConfigUnchanged(snapshot, current),
       leftPage: false,
       nextOrder: out.nextOrder,
       persistOrder: () => { saved = true; return true },
@@ -523,7 +617,7 @@ describe('runBatchEngineProbe', () => {
 })
 
 describe('callEngineProbe', () => {
-  it('Google / DeepL / DeepLX / 第三方 AI 传入同一测试文本、中文目标和 timeoutMs', async () => {
+  it('各引擎传入同一测试文本、中文目标和 timeoutMs', async () => {
     const captured = {}
     const text = 'Hello World round-x'
     const timeoutMs = 1234
@@ -551,10 +645,30 @@ describe('callEngineProbe', () => {
           captured.thirdparty = { url, key, body, ms }
           return { choices: [{ message: { content: '你好' } }] }
         },
+        baiduTranslate: async (t, from, to, appid, secret, ms) => {
+          captured.baidu = { t, from, to, appid, secret, ms }
+          return '你好'
+        },
+        aliyunTranslate: async (t, from, to, id, secret, ms) => {
+          captured.aliyun = { t, from, to, id, secret, ms }
+          return '你好'
+        },
+        caiyunTranslate: async (t, from, to, token, ms) => {
+          captured.caiyun = { t, from, to, token, ms }
+          return '你好'
+        },
       },
     }
+    const probeSettings = {
+      ...CONFIGURED,
+      baiduAppId: 'bid',
+      baiduSecret: 'bsec',
+      aliyunAccessKeyId: 'ak',
+      aliyunAccessKeySecret: 'aks',
+      caiyunToken: 'ctok',
+    }
     for (const engine of KNOWN_ENGINES) {
-      const r = await callEngineProbe(engine, { text, settings: CONFIGURED, env, timeoutMs })
+      const r = await callEngineProbe(engine, { text, settings: probeSettings, env, timeoutMs })
       assert.equal(r.translation.includes('你好'), true)
     }
     assert.equal(captured.google.t, text)
@@ -572,6 +686,13 @@ describe('callEngineProbe', () => {
     assert.equal(captured.thirdparty.body.messages[0].content.includes(text), true)
     assert.equal(captured.thirdparty.key, 'sk-secret')
     assert.equal(captured.ai.messages[0].content.includes(text), true)
+    assert.equal(captured.baidu.t, text)
+    assert.equal(captured.baidu.appid, 'bid')
+    assert.equal(captured.baidu.ms, timeoutMs)
+    assert.equal(captured.aliyun.id, 'ak')
+    assert.equal(captured.aliyun.ms, timeoutMs)
+    assert.equal(captured.caiyun.token, 'ctok')
+    assert.equal(captured.caiyun.ms, timeoutMs)
   })
 
   it('Google 探测传入快照中的代理配置', async () => {

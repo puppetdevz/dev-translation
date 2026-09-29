@@ -2,6 +2,8 @@ import { describe, it } from 'node:test'
 import assert from 'node:assert/strict'
 import {
   inspectEngine,
+  inspectEngineInputLimit,
+  inspectEngineForCall,
   classifyError,
   runEngineFailover,
   buildAllFailedMessage,
@@ -14,6 +16,8 @@ import {
   SKIP_CATEGORY,
   ERROR_CATEGORY,
   EMPTY_DICT,
+  ENGINE_CHAR_LIMITS,
+  countEngineChars,
 } from '../src/Translate/utils/engineBridge.js'
 
 function hang() {
@@ -40,6 +44,9 @@ const PRELOAD_SERVICES = {
   googleTranslate: async () => 'ok',
   deeplTranslate: async () => 'ok',
   deeplxTranslate: async () => 'ok',
+  baiduTranslate: async () => 'ok',
+  aliyunTranslate: async () => 'ok',
+  caiyunTranslate: async () => 'ok',
   requestThirdpartyAI: async () => ({ choices: [{ message: { content: 'ok' } }] }),
   lookupWord: async () => ({ phonetic: 'x', definitions: ['d'], examples: ['e'] }),
 }
@@ -47,7 +54,7 @@ const PRELOAD_SERVICES = {
 describe('inspectEngine', () => {
   it('window.services 整体缺失时 preload 引擎按环境跳过，不视为可调用', () => {
     const env = { services: undefined, utools: { ai: async () => ({}) } }
-    for (const engine of ['google', 'deepl', 'deeplx', 'thirdparty-ai']) {
+    for (const engine of ['google', 'deepl', 'deeplx', 'thirdparty-ai', 'baidu', 'aliyun', 'caiyun']) {
       const r = inspectEngine(engine, {
         deeplApiKey: 'k',
         deeplxServerUrl: 'http://localhost:1188',
@@ -78,10 +85,17 @@ describe('inspectEngine', () => {
     const deepl = inspectEngine('deepl', { deeplApiKey: '' }, env)
     const deeplx = inspectEngine('deeplx', { deeplxServerUrl: '  ' }, env)
     const ai3 = inspectEngine('thirdparty-ai', { thirdpartyAiGroups: [{ id: 'g_a', name: 'A', url: 'https://x', apiKey: 'sk', model: '' }] }, env)
+    const baidu = inspectEngine('baidu', { baiduAppId: 'id', baiduSecret: '' }, env)
+    const aliyun = inspectEngine('aliyun', { aliyunAccessKeyId: '', aliyunAccessKeySecret: 's' }, env)
+    const caiyun = inspectEngine('caiyun', { caiyunToken: '  ' }, env)
     assert.equal(deepl.skipReason, SKIP_REASON.NOT_CONFIGURED)
     assert.equal(deeplx.skipReason, SKIP_REASON.NOT_CONFIGURED)
     assert.equal(ai3.skipReason, SKIP_REASON.NOT_CONFIGURED)
+    assert.equal(baidu.skipReason, SKIP_REASON.NOT_CONFIGURED)
+    assert.equal(aliyun.skipReason, SKIP_REASON.NOT_CONFIGURED)
+    assert.equal(caiyun.skipReason, SKIP_REASON.NOT_CONFIGURED)
     assert.equal(deepl.skipCategory, SKIP_CATEGORY.CONFIG)
+    assert.equal(baidu.skipCategory, SKIP_CATEGORY.CONFIG)
   })
 
   it('uTools AI 方法存在且 preload 完整时标记 ready', () => {
@@ -114,6 +128,22 @@ describe('classifyError', () => {
     assert.equal(r.safeMessage, '引擎请求超时')
     assert.equal(r.safeMessage.includes('https://'), false)
     assert.equal(r.safeMessage.includes('token'), false)
+  })
+
+  it('厂商业务错误映射为安全类别，丢弃原始响应', () => {
+    for (const category of [
+      ERROR_CATEGORY.AUTH_ERROR,
+      ERROR_CATEGORY.QUOTA_ERROR,
+      ERROR_CATEGORY.RATE_LIMIT,
+      ERROR_CATEGORY.BUSINESS_ERROR,
+    ]) {
+      const err = new Error('private token Hello https://secret.example')
+      err.category = category
+      const classified = classifyError(err)
+      assert.equal(classified.category, category)
+      assert.equal(classified.safeMessage.includes('private'), false)
+      assert.equal(classified.safeMessage.includes('https://'), false)
+    }
   })
 
   it('识别代理连接失败并保留来源级安全诊断', () => {
@@ -531,4 +561,119 @@ describe('主译文与词典解耦', () => {
     assert.equal(canApplyDictionarySupplement({ ...base, usedEngine: 'deepl' }), false)
     assert.equal(canApplyDictionarySupplement({ ...base, currentTranslation: '新译文' }), false)
   })
+})
+
+describe('输入限制跳过', () => {
+  const env = { services: PRELOAD_SERVICES, utools: { ai: async () => ({}) } }
+  const configured = {
+    baiduAppId: 'id',
+    baiduSecret: 's',
+    aliyunAccessKeyId: 'ak',
+    aliyunAccessKeySecret: 'sk',
+    caiyunToken: 'tok',
+  }
+
+  it('百度 1000、阿里 5000 为上限，边界内 ready，超过为独立 input 跳过',
+    () => {
+      assert.equal(ENGINE_CHAR_LIMITS.baidu, 1000)
+      assert.equal(ENGINE_CHAR_LIMITS.aliyun, 5000)
+      assert.equal(countEngineChars('a😀， '), 4)
+      assert.equal(inspectEngineInputLimit('baidu', 'a'.repeat(998) + '😀 ' ).status, 'ready')
+      assert.equal(inspectEngineInputLimit('baidu', 'a'.repeat(1000)).status, 'ready')
+      assert.equal(inspectEngineInputLimit('aliyun', 'a'.repeat(5000)).status, 'ready')
+      const baidu = inspectEngineInputLimit('baidu', 'a'.repeat(1001))
+      const aliyun = inspectEngineInputLimit('aliyun', 'a'.repeat(5001))
+      assert.equal(baidu.status, 'skipped')
+      assert.equal(baidu.skipReason, SKIP_REASON.INPUT_LIMIT)
+      assert.equal(baidu.skipCategory, SKIP_CATEGORY.INPUT)
+      assert.equal(baidu.safeMessage, '文本超过该引擎单次限制')
+      assert.notEqual(baidu.skipReason, SKIP_REASON.NOT_CONFIGURED)
+      assert.equal(aliyun.skipReason, SKIP_REASON.INPUT_LIMIT)
+      assert.equal(inspectEngineInputLimit('caiyun', 'a'.repeat(8000)).status, 'ready')
+      assert.equal(inspectEngineInputLimit('google', 'a'.repeat(8000)).status, 'ready')
+    })
+
+  it('超长在真实调用前跳过，不计失败，下一引擎继续',
+    async () => {
+      const calls = []
+      const skipped = []
+      const failures = []
+      const out = await runEngineFailover({
+        order: ['baidu', 'google'],
+        settings: configured,
+        env,
+        text: 'x'.repeat(1001),
+        translateWith: async (engine) => {
+          calls.push(engine)
+          return { translation: 'ok' }
+        },
+        isCurrent: () => true,
+        onSkip: (engine, inspection) => skipped.push({ engine, ...inspection }),
+        onFailure: (engine) => failures.push(engine),
+      })
+      assert.deepEqual(calls, ['google'])
+      assert.equal(out.success, true)
+      assert.equal(out.engine, 'google')
+      assert.equal(skipped.length, 1)
+      assert.equal(skipped[0].engine, 'baidu')
+      assert.equal(skipped[0].skipReason, SKIP_REASON.INPUT_LIMIT)
+      assert.deepEqual(failures, [])
+    })
+
+  it('新引擎真实失败各只计一次并继续回退，错误类别不泄露正文', async () => {
+    const failures = []
+    const attempts = []
+    const out = await runEngineFailover({
+      order: ['baidu', 'aliyun', 'caiyun', 'google'],
+      settings: configured,
+      env,
+      text: 'Hello World',
+      timeoutMs: 100,
+      translateWith: async (engine) => {
+        attempts.push(engine)
+        if (engine === 'baidu') {
+          const error = new Error('raw source and credential leaked')
+          error.category = ERROR_CATEGORY.AUTH_ERROR
+          throw error
+        }
+        if (engine === 'aliyun') {
+          const error = new Error('raw SourceText=Hello World')
+          error.category = ERROR_CATEGORY.QUOTA_ERROR
+          throw error
+        }
+        if (engine === 'caiyun') throw new Error('引擎返回空结果')
+        return { translation: '你好' }
+      },
+      isCurrent: () => true,
+      onFailure: (engine, classified) => failures.push({ engine, ...classified }),
+    })
+    assert.deepEqual(attempts, ['baidu', 'aliyun', 'caiyun', 'google'])
+    assert.equal(out.engine, 'google')
+    assert.equal(failures.length, 3)
+    assert.deepEqual(failures.map(f => f.category), [
+      ERROR_CATEGORY.AUTH_ERROR,
+      ERROR_CATEGORY.QUOTA_ERROR,
+      ERROR_CATEGORY.EMPTY_RESULT,
+    ])
+    assert.equal(JSON.stringify(failures).includes('SourceText'), false)
+  })
+
+  it('缺凭据优先于超长，且两者都不发请求',
+    async () => {
+      const calls = []
+      const out = inspectEngineForCall('baidu', { baiduAppId: '', baiduSecret: '' }, env, 'x'.repeat(1001))
+      assert.equal(out.skipReason, SKIP_REASON.NOT_CONFIGURED)
+      await runEngineFailover({
+        order: ['baidu'],
+        settings: { baiduAppId: '', baiduSecret: '' },
+        env,
+        text: 'x'.repeat(1001),
+        translateWith: async (engine) => {
+          calls.push(engine)
+          return { translation: 'nope' }
+        },
+        isCurrent: () => true,
+      })
+      assert.deepEqual(calls, [])
+    })
 })

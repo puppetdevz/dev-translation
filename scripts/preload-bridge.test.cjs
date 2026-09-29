@@ -43,6 +43,9 @@ const METHODS = [
   'googleTranslate',
   'deeplTranslate',
   'deeplxTranslate',
+  'baiduTranslate',
+  'aliyunTranslate',
+  'caiyunTranslate',
   'requestThirdpartyAI',
   'fetchThirdpartyModels',
   'lookupWord',
@@ -398,6 +401,7 @@ describe('Google CONNECT 代理传输', () => {
   let proxy
   let connects
   let mode
+  let proxySockets
 
   beforeEach(async () => {
     const loaded = loadServicesWithGoogleRequire(true)
@@ -405,9 +409,14 @@ describe('Google CONNECT 代理传输', () => {
     testApi = loaded.testApi
     connects = []
     mode = 'fail'
+    proxySockets = new Set()
     proxy = http.createServer((_req, res) => {
       res.writeHead(400)
       res.end()
+    })
+    proxy.on('connection', (socket) => {
+      proxySockets.add(socket)
+      socket.on('close', () => proxySockets.delete(socket))
     })
     proxy.on('connect', (req, clientSocket) => {
       connects.push(req.url)
@@ -425,6 +434,8 @@ describe('Google CONNECT 代理传输', () => {
       testApi.clearTranslateCache()
     }
     if (proxy) {
+      // CONNECT 升级后的测试 socket 不再由 http.Server 管理，挂起用例需显式关闭。
+      for (const socket of proxySockets) socket.destroy()
       await new Promise((resolve) => proxy.close(() => resolve()))
     }
   })

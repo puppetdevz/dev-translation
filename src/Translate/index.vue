@@ -259,6 +259,44 @@ const translateWithDeepLX = async (timeoutMs) => {
   )
 }
 
+const translateWithBaidu = async (timeoutMs, settingsSnap) => {
+  return translateWithDictEngine(
+    (text, from, to) => window.services.baiduTranslate(
+      text,
+      from,
+      to,
+      settingsSnap.baiduAppId,
+      settingsSnap.baiduSecret,
+      timeoutMs,
+    )
+  )
+}
+
+const translateWithAliyun = async (timeoutMs, settingsSnap) => {
+  return translateWithDictEngine(
+    (text, from, to) => window.services.aliyunTranslate(
+      text,
+      from,
+      to,
+      settingsSnap.aliyunAccessKeyId,
+      settingsSnap.aliyunAccessKeySecret,
+      timeoutMs,
+    )
+  )
+}
+
+const translateWithCaiyun = async (timeoutMs, settingsSnap) => {
+  return translateWithDictEngine(
+    (text, from, to) => window.services.caiyunTranslate(
+      text,
+      from,
+      to,
+      settingsSnap.caiyunToken,
+      timeoutMs,
+    )
+  )
+}
+
 // AI 翻译（语言检测、prompt 构建、utools.ai 调用、parseResult）
 const translateWithAI = async () => {
   const lang = detectedLanguage.value || detectLanguage(inputText.value)
@@ -358,6 +396,9 @@ const translateWithEngine = async (engine, timeoutMs, settingsSnap, requestId) =
     case 'google': return translateWithGoogle(timeoutMs, settingsSnap)
     case 'deepl': return translateWithDeepL(timeoutMs)
     case 'deeplx': return translateWithDeepLX(timeoutMs)
+    case 'baidu': return translateWithBaidu(timeoutMs, settingsSnap)
+    case 'aliyun': return translateWithAliyun(timeoutMs, settingsSnap)
+    case 'caiyun': return translateWithCaiyun(timeoutMs, settingsSnap)
     case 'thirdparty-ai': return translateWithThirdpartyAI(settingsSnap, requestId)
     case 'ai':
     default: return translateWithAI()
@@ -399,11 +440,6 @@ const translate = async () => {
     return
   }
 
-  if (inputText.value.length > 5000) {
-    error.value = '文本过长，请控制在5000字符以内'
-    return
-  }
-
   isLoading.value = true
   error.value = ''
   translationResult.value = null
@@ -430,15 +466,23 @@ const translate = async () => {
       deeplApiKey: settings.deeplApiKey,
       deeplxServerUrl: settings.deeplxServerUrl,
       deeplxToken: settings.deeplxToken,
+      baiduAppId: settings.baiduAppId,
+      baiduSecret: settings.baiduSecret,
+      aliyunAccessKeyId: settings.aliyunAccessKeyId,
+      aliyunAccessKeySecret: settings.aliyunAccessKeySecret,
+      caiyunToken: settings.caiyunToken,
     }
 
+    let primaryInputLimited = false
     const outcome = await runEngineFailover({
       order,
       settings: settingsSnap,
       timeoutMs,
+      text: inputText.value.trim(),
       translateWith: (engine) => translateWithEngine(engine, timeoutMs, settingsSnap, myRequestId),
       isCurrent: () => myRequestId === translateRequestId,
       onSkip: (engine, inspection, meta) => {
+        if (engine === order[0] && inspection.skipReason === SKIP_REASON.INPUT_LIMIT) primaryInputLimited = true
         recordEngineSkip(engine, inspection.skipCategory)
         if (inspection.skipReason === SKIP_REASON.BRIDGE_MISSING) {
           if (meta && meta.notifyOnce) {
@@ -479,7 +523,9 @@ const translate = async () => {
         logger.info(engine, '翻译成功', { phase: PHASE.CALL, requestId: myRequestId })
         recordEngineResult(engine, true)
         if (index > 0) {
-          fallbackNotice.value = `${engineDisplayName(order[0])} 不可用，已切换到 ${engineDisplayName(engine)}`
+          fallbackNotice.value = primaryInputLimited
+            ? `文本超过该引擎单次限制，已切换到 ${engineDisplayName(engine)}`
+            : `${engineDisplayName(order[0])} 不可用，已切换到 ${engineDisplayName(engine)}`
           if (fallbackTimer) clearTimeout(fallbackTimer)
           fallbackTimer = setTimeout(() => {
             fallbackNotice.value = ''
@@ -601,8 +647,8 @@ const toggleVariableNaming = () => {
   toggleSetting('showVariableNaming')
 }
 
-// Footer 快捷切换可循环的引擎顺序（与 SettingsPage 拖拽可配置范围保持一致，含 5 引擎）
-const FOOTER_ENGINE_CYCLE = ['ai', 'thirdparty-ai', 'google', 'deepl', 'deeplx']
+// Footer 快捷切换可循环的引擎顺序（与 SettingsPage 拖拽可配置范围保持一致）
+const FOOTER_ENGINE_CYCLE = ['ai', 'thirdparty-ai', 'google', 'deepl', 'deeplx', 'baidu', 'aliyun', 'caiyun']
 
 const toggleTranslationEngine = () => {
   const order = (settings.failoverOrder && settings.failoverOrder.length) ? [...settings.failoverOrder] : ['ai']
@@ -620,6 +666,9 @@ const mainEngineShortLabel = (main) => {
   if (main === 'google') return 'Google'
   if (main === 'deepl') return 'DeepL'
   if (main === 'deeplx') return 'DeepLX'
+  if (main === 'baidu') return '百度'
+  if (main === 'aliyun') return '阿里'
+  if (main === 'caiyun') return '彩云'
   if (main === 'thirdparty-ai') return '自定义'
   return 'uTools'
 }
@@ -628,7 +677,16 @@ const mainEngineShortLabel = (main) => {
 const usedEngineLabel = computed(() => {
   const e = usedEngine.value
   if (!e) return ''
-  const names = { ai: 'uTools AI', 'thirdparty-ai': '自定义 AI', google: 'Google', deepl: 'DeepL', deeplx: 'DeepLX' }
+  const names = {
+    ai: 'uTools AI',
+    'thirdparty-ai': '自定义 AI',
+    google: 'Google',
+    deepl: 'DeepL',
+    deeplx: 'DeepLX',
+    baidu: '百度',
+    aliyun: '阿里',
+    caiyun: '彩云',
+  }
   return names[e] || e
 })
 
@@ -637,6 +695,9 @@ const engineLabel = computed(() => {
   if (main === 'google') return 'Google 翻译引擎模式'
   if (main === 'deepl') return 'DeepL 翻译引擎模式'
   if (main === 'deeplx') return 'DeepLX 翻译引擎模式'
+  if (main === 'baidu') return '百度翻译引擎模式'
+  if (main === 'aliyun') return '阿里翻译引擎模式'
+  if (main === 'caiyun') return '彩云小译引擎模式'
   if (main === 'thirdparty-ai') return '自定义 AI 翻译引擎模式'
   return 'uTools AI 翻译引擎模式'
 })

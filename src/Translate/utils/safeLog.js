@@ -10,6 +10,11 @@ const ALLOWED_CATEGORY = {
   bridge_missing: true,
   method_missing: true,
   not_configured: true,
+  input_limit: true,
+  auth_error: true,
+  quota_error: true,
+  rate_limit: true,
+  business_error: true,
   http_error: true,
   timeout: true,
   parse_error: true,
@@ -44,6 +49,7 @@ const ALLOWED_SKIP_REASON = {
   bridge_missing: true,
   method_missing: true,
   not_configured: true,
+  input_limit: true,
 }
 
 const SENSITIVE_RE = /sk-[a-zA-Z0-9]|Bearer\s+\S+|DeepL-Auth-Key|api[_-]?key|authorization|password|token=/i
@@ -68,6 +74,11 @@ function categoryFallbackMessage(category, statusCode) {
   if (category === 'bridge_missing') return '翻译服务未加载'
   if (category === 'method_missing') return '翻译服务方法不可用'
   if (category === 'not_configured') return '引擎未配置必要凭据或地址'
+  if (category === 'input_limit') return '文本超过该引擎单次限制'
+  if (category === 'auth_error') return '引擎鉴权失败'
+  if (category === 'quota_error') return '引擎额度不足或服务未开通'
+  if (category === 'rate_limit') return '引擎请求受限流'
+  if (category === 'business_error') return '引擎返回业务错误'
   if (category === 'http_error') {
     return Number.isFinite(Number(statusCode)) ? `引擎返回 HTTP ${Number(statusCode)}` : '引擎返回 HTTP 错误'
   }
@@ -127,7 +138,7 @@ export function sanitizeLogEntry(entry) {
   const statusCode = pickFiniteStatus(entry.statusCode)
   const phase = ALLOWED_PHASE[entry.phase] ? entry.phase : undefined
   const skipReason = ALLOWED_SKIP_REASON[entry.skipReason] ? entry.skipReason : undefined
-  const skipCategory = (entry.skipCategory === 'env' || entry.skipCategory === 'config')
+  const skipCategory = (entry.skipCategory === 'env' || entry.skipCategory === 'config' || entry.skipCategory === 'input')
     ? entry.skipCategory
     : undefined
   const requestId = Number.isFinite(Number(entry.requestId)) ? Number(entry.requestId) : undefined

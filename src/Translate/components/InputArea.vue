@@ -121,7 +121,6 @@ const handleKeydown = (event) => {
         v-model="text"
         class="input-textarea"
         placeholder="请输入要翻译的内容..."
-        maxlength="5000"
         @keydown="handleKeydown"
       />
       <div class="input-footer">
@@ -135,8 +134,8 @@ const handleKeydown = (event) => {
           <span class="badge-text">{{ isDetectingPlaceholder ? '自动识别' : languageIndicator }}</span>
           <span v-if="!isDetectingPlaceholder && isManualOverride" class="badge-manual">🔒</span>
         </div>
-        <span class="char-count" :class="{ 'char-count-warning': charCount > 4500 }">
-          字符数: {{ charCount }}/5000
+        <span class="char-count" :class="{ 'char-count-warning': charCount > 5000 }">
+          字符数: {{ charCount }}
         </span>
       </div>
     </div>

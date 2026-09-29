@@ -12,6 +12,9 @@ export const ENGINE_DISPLAY_NAMES = {
   google: 'Google 翻译',
   deepl: 'DeepL 官方',
   deeplx: 'DeepLX 自部署',
+  baidu: '百度翻译',
+  aliyun: '阿里翻译',
+  caiyun: '彩云小译',
 }
 
 export const PRELOAD_METHODS = {
@@ -19,17 +22,22 @@ export const PRELOAD_METHODS = {
   deepl: 'deeplTranslate',
   deeplx: 'deeplxTranslate',
   'thirdparty-ai': 'requestThirdpartyAI',
+  baidu: 'baiduTranslate',
+  aliyun: 'aliyunTranslate',
+  caiyun: 'caiyunTranslate',
 }
 
 export const SKIP_REASON = {
   BRIDGE_MISSING: 'bridge_missing',
   METHOD_MISSING: 'method_missing',
   NOT_CONFIGURED: 'not_configured',
+  INPUT_LIMIT: 'input_limit',
 }
 
 export const SKIP_CATEGORY = {
   ENV: 'env',
   CONFIG: 'config',
+  INPUT: 'input',
 }
 
 export const ERROR_CATEGORY = {
@@ -37,6 +45,11 @@ export const ERROR_CATEGORY = {
   BRIDGE_MISSING: 'bridge_missing',
   METHOD_MISSING: 'method_missing',
   NOT_CONFIGURED: 'not_configured',
+  INPUT_LIMIT: 'input_limit',
+  AUTH_ERROR: 'auth_error',
+  QUOTA_ERROR: 'quota_error',
+  RATE_LIMIT: 'rate_limit',
+  BUSINESS_ERROR: 'business_error',
   HTTP_ERROR: 'http_error',
   TIMEOUT: 'timeout',
   PARSE_ERROR: 'parse_error',
@@ -44,6 +57,12 @@ export const ERROR_CATEGORY = {
   NETWORK_ERROR: 'network_error',
   PROXY_CONNECT: 'proxy_connect',
   UNKNOWN: 'unknown',
+}
+
+/** 百度标准版 / 阿里 TranslateGeneral 官方单次字符上限；彩云不自设阈值 */
+export const ENGINE_CHAR_LIMITS = {
+  baidu: 1000,
+  aliyun: 5000,
 }
 
 export const PHASE = {
@@ -61,6 +80,9 @@ export const DICT_ENGINES = {
   google: true,
   deepl: true,
   deeplx: true,
+  baidu: true,
+  aliyun: true,
+  caiyun: true,
 }
 
 const DEFAULT_ENGINE_TIMEOUT_MS = 5000
@@ -70,6 +92,11 @@ export const SAFE_MESSAGES = {
   BRIDGE_MISSING: '翻译服务未加载',
   METHOD_MISSING: '翻译服务方法不可用',
   NOT_CONFIGURED: '引擎未配置必要凭据或地址',
+  INPUT_LIMIT: '文本超过该引擎单次限制',
+  AUTH_ERROR: '引擎鉴权失败',
+  QUOTA_ERROR: '引擎额度不足或服务未开通',
+  RATE_LIMIT: '引擎请求受限流',
+  BUSINESS_ERROR: '引擎返回业务错误',
   HTTP_ERROR: '引擎返回 HTTP 错误',
   TIMEOUT: '引擎请求超时',
   PARSE_ERROR: '翻译结果解析失败',
@@ -169,8 +196,67 @@ export function inspectEngine(engine, settings = {}, env = getRuntimeEnv()) {
       safeMessage: SAFE_MESSAGES.NOT_CONFIGURED,
     }
   }
+  if (engine === 'baidu' && (isBlank(settings.baiduAppId) || isBlank(settings.baiduSecret))) {
+    return {
+      status: 'skipped',
+      skipReason: SKIP_REASON.NOT_CONFIGURED,
+      skipCategory: SKIP_CATEGORY.CONFIG,
+      category: ERROR_CATEGORY.NOT_CONFIGURED,
+      safeMessage: SAFE_MESSAGES.NOT_CONFIGURED,
+    }
+  }
+  if (engine === 'aliyun' && (isBlank(settings.aliyunAccessKeyId) || isBlank(settings.aliyunAccessKeySecret))) {
+    return {
+      status: 'skipped',
+      skipReason: SKIP_REASON.NOT_CONFIGURED,
+      skipCategory: SKIP_CATEGORY.CONFIG,
+      category: ERROR_CATEGORY.NOT_CONFIGURED,
+      safeMessage: SAFE_MESSAGES.NOT_CONFIGURED,
+    }
+  }
+  if (engine === 'caiyun' && isBlank(settings.caiyunToken)) {
+    return {
+      status: 'skipped',
+      skipReason: SKIP_REASON.NOT_CONFIGURED,
+      skipCategory: SKIP_CATEGORY.CONFIG,
+      category: ERROR_CATEGORY.NOT_CONFIGURED,
+      safeMessage: SAFE_MESSAGES.NOT_CONFIGURED,
+    }
+  }
 
   return { status: 'ready' }
+}
+
+export function countEngineChars(text) {
+  // 按 Unicode 字符而不是 UTF-16 代码单元计数；包含空格、标点与换行。
+  return Array.from(String(text == null ? '' : text)).length
+}
+
+function inputLimitSkip() {
+  return {
+    status: 'skipped',
+    skipReason: SKIP_REASON.INPUT_LIMIT,
+    skipCategory: SKIP_CATEGORY.INPUT,
+    category: ERROR_CATEGORY.INPUT_LIMIT,
+    safeMessage: SAFE_MESSAGES.INPUT_LIMIT,
+  }
+}
+
+/**
+ * 请求前本地超长预检：超过官方单次上限则跳过且不发请求。
+ * 无上限的引擎（含彩云）直接 ready。
+ */
+export function inspectEngineInputLimit(engine, text) {
+  const limit = ENGINE_CHAR_LIMITS[engine]
+  if (!limit) return { status: 'ready' }
+  if (countEngineChars(text) > limit) return inputLimitSkip()
+  return { status: 'ready' }
+}
+
+export function inspectEngineForCall(engine, settings = {}, env = getRuntimeEnv(), text) {
+  const inspection = inspectEngine(engine, settings, env)
+  if (inspection.status === 'skipped') return inspection
+  return inspectEngineInputLimit(engine, text)
 }
 
 function extractStatusCode(err, raw) {
@@ -220,6 +306,17 @@ export function classifyError(err) {
       category: ERROR_CATEGORY.STATUS_524,
       statusCode: 524,
       safeMessage: SAFE_MESSAGES.STATUS_524,
+    }
+  } else if ([
+    ERROR_CATEGORY.AUTH_ERROR,
+    ERROR_CATEGORY.QUOTA_ERROR,
+    ERROR_CATEGORY.RATE_LIMIT,
+    ERROR_CATEGORY.BUSINESS_ERROR,
+  ].includes(tagged)) {
+    result = {
+      category: tagged,
+      statusCode,
+      safeMessage: SAFE_MESSAGES[tagged.toUpperCase()],
     }
   } else if (tagged === ERROR_CATEGORY.PROXY_CONNECT || /代理连接失败/.test(raw)) {
     result = {
@@ -279,6 +376,9 @@ export function skipUserMessage(inspection) {
   if (inspection.skipReason === SKIP_REASON.NOT_CONFIGURED) {
     return '该引擎未配置必要凭据或地址，请先在设置中填写。'
   }
+  if (inspection.skipReason === SKIP_REASON.INPUT_LIMIT) {
+    return SAFE_MESSAGES.INPUT_LIMIT
+  }
   if (inspection.skipReason === SKIP_REASON.METHOD_MISSING) {
     return '翻译服务方法不可用。请重载插件，或确认安装的是最新版本后重新安装。'
   }
@@ -297,6 +397,7 @@ export function buildAllFailedMessage(outcomes) {
   const failures = outcomes.filter(o => o.status === 'failure')
   const envSkips = skipped.filter(o => o.skipCategory === SKIP_CATEGORY.ENV)
   const configSkips = skipped.filter(o => o.skipCategory === SKIP_CATEGORY.CONFIG)
+  const inputSkips = skipped.filter(o => o.skipCategory === SKIP_CATEGORY.INPUT)
   const preloadOutcomes = outcomes.filter(o => o.engine !== 'ai')
   const allPreloadBridge = preloadOutcomes.length > 0 && preloadOutcomes.every(
     o => o.status === 'skipped' && o.skipReason === SKIP_REASON.BRIDGE_MISSING
@@ -321,15 +422,22 @@ export function buildAllFailedMessage(outcomes) {
     if (envSkips.length === skipped.length) {
       return SAFE_MESSAGES.RELOAD_HINT
     }
+    if (inputSkips.length === skipped.length) {
+      return SAFE_MESSAGES.INPUT_LIMIT
+    }
+    if (inputSkips.length) {
+      return `${SAFE_MESSAGES.INPUT_LIMIT}，其余引擎不可用。请检查设置后再试。`
+    }
     return '所有引擎均已跳过。请检查设置、重载插件后再试。'
   }
 
   if (failures.length > 0) {
     const names = failNames.join('、')
+    const inputHint = inputSkips.length ? `${SAFE_MESSAGES.INPUT_LIMIT}；` : ''
     if (configSkips.length && envSkips.length === 0) {
-      return `${names}调用失败，其余引擎未配置。请稍后重试或在设置中补充配置。`
+      return `${inputHint}${names}调用失败，其余引擎未配置。请稍后重试或在设置中补充配置。`
     }
-    return `可用引擎均调用失败（${names}）。请稍后重试或更换引擎。`
+    return `${inputHint}可用引擎均调用失败（${names}）。请稍后重试或更换引擎。`
   }
 
   return '所有引擎均不可用。请检查设置后重试。'
@@ -418,6 +526,7 @@ export async function runEngineFailover({
   onFailure,
   onSuccess,
   timeoutMs,
+  text,
 }) {
   const outcomes = []
   const list = Array.isArray(order) && order.length > 0 ? order : ['ai']
@@ -430,7 +539,7 @@ export async function runEngineFailover({
       return { stale: true, outcomes }
     }
     const engine = list[i]
-    const inspection = inspectEngine(engine, settings, runtime)
+    const inspection = inspectEngineForCall(engine, settings, runtime, text)
     if (inspection.status === 'skipped') {
       const notifyOnce = inspection.skipReason === SKIP_REASON.BRIDGE_MISSING && !bridgeMissingNotified
       outcomes.push({ engine, status: 'skipped', ...inspection })

@@ -102,7 +102,7 @@ describe('自定义 AI 组迁移与持久化', () => {
     assert.equal(s.thirdpartyAiGroups[0].apiKey, 'sk-old')
     assert.equal(s.thirdpartyAiGroups[0].model, 'gpt-old')
     assert.equal(s.thirdpartyAiSystemPrompt, 'be concise')
-    assert.deepEqual(s.failoverOrder, ['google', 'ai', 'thirdparty-ai', 'deepl', 'deeplx'])
+    assert.deepEqual(s.failoverOrder, ['google', 'ai', 'thirdparty-ai', 'deepl', 'deeplx', 'baidu', 'aliyun', 'caiyun'])
     assert.equal(s.engineResponseTimeoutSeconds, 12)
     assert.equal(s.thirdpartyAiUrl, undefined)
     assert.equal(s.thirdpartyAiKey, undefined)
