@@ -6,6 +6,7 @@ import { copyText } from '../utils/clipboard.js'
 import { getLogs, clearLogs, getLogCount, formatLogsText } from '../utils/logger.js'
 import { LOG_LEVEL_OPTIONS, LOG_RETENTION_OPTIONS, levelLabel } from '../utils/logConstants.js'
 import { getEngineStats, clearEngineStats, computeStability, ENGINE_STATS_RECENT_WINDOW } from '../utils/engineStats.js'
+import { inspectEngine, classifyError, skipUserMessage } from '../utils/engineBridge.js'
 
 const router = useRouter()
 const { settings, updateSetting, toggleSetting } = useSettings()
@@ -45,10 +46,14 @@ const runEngineTest = async (engine) => {
   testingEngine.value = engine
   testResult.value = null
   try {
+    const inspection = inspectEngine(engine, settings)
+    if (inspection.status === 'skipped') {
+      testResult.value = { engine, ok: false, message: skipUserMessage(inspection) }
+      return
+    }
     let result = ''
     switch (engine) {
       case 'ai': {
-        if (!window.utools || !window.utools.ai) throw new Error('uTools AI 不可用，请在 uTools 中配置 AI 服务')
         const r = await window.utools.ai({
           messages: [{ role: 'user', content: 'Translate the following text to Simplified Chinese and reply with the translation only:\n' + TEST_TEXT }]
         })
@@ -56,14 +61,12 @@ const runEngineTest = async (engine) => {
         break
       }
       case 'thirdparty-ai': {
-        if (!settings.thirdpartyAiUrl || !settings.thirdpartyAiUrl.trim()) throw new Error('请先填写 API 链接')
-        if (!settings.thirdpartyAiModel || !settings.thirdpartyAiModel.trim()) throw new Error('请先填写模型名')
         const data = await window.services.requestThirdpartyAI(
           settings.thirdpartyAiUrl,
           settings.thirdpartyAiKey,
           { model: settings.thirdpartyAiModel, messages: [{ role: 'user', content: 'Translate the following text to Simplified Chinese and reply with the translation only:\n' + TEST_TEXT }], stream: false }
         )
-        if (data && data.error) throw new Error((typeof data.error === 'object' && data.error.message) || JSON.stringify(data.error))
+        if (data && data.error) throw new Error('自定义 AI 返回错误')
         result = (data?.choices?.[0]?.message?.content || '').trim()
         break
       }
@@ -71,11 +74,9 @@ const runEngineTest = async (engine) => {
         result = await window.services.googleTranslate(TEST_TEXT, 'en', 'zh-CN')
         break
       case 'deepl':
-        if (!settings.deeplApiKey || !settings.deeplApiKey.trim()) throw new Error('请先填写 DeepL API Key')
         result = await window.services.deeplTranslate(TEST_TEXT, 'en', 'zh-CN', settings.deeplApiKey)
         break
       case 'deeplx':
-        if (!settings.deeplxServerUrl || !settings.deeplxServerUrl.trim()) throw new Error('请先填写 DeepLX 服务器地址')
         result = await window.services.deeplxTranslate(TEST_TEXT, 'en', 'zh-CN', settings.deeplxServerUrl, settings.deeplxToken)
         break
       default:
@@ -84,7 +85,8 @@ const runEngineTest = async (engine) => {
     if (!result) throw new Error('引擎返回空结果')
     testResult.value = { engine, ok: true, message: `连接正常：${result}` }
   } catch (err) {
-    testResult.value = { engine, ok: false, message: err.message || '测试失败' }
+    const classified = classifyError(err)
+    testResult.value = { engine, ok: false, message: classified.safeMessage || '测试失败' }
   } finally {
     testingEngine.value = ''
   }
@@ -154,8 +156,8 @@ const handleFetchModels = async () => {
     modelList.value = []
     return
   }
-  if (!window.services || !window.services.fetchThirdpartyModels) {
-    modelListError.value = '服务不可用'
+  if (!window.services || typeof window.services.fetchThirdpartyModels !== 'function') {
+    modelListError.value = '翻译服务未加载。请重载插件，或确认安装的是最新版本后重新安装。'
     return
   }
   fetchingModels.value = true
@@ -168,7 +170,8 @@ const handleFetchModels = async () => {
     )
     modelList.value = models
   } catch (err) {
-    modelListError.value = err.message || '获取模型失败'
+    const classified = classifyError(err)
+    modelListError.value = classified.safeMessage || '获取模型失败'
   } finally {
     fetchingModels.value = false
   }
@@ -320,7 +323,7 @@ const stabilityList = computed(() => {
 })
 
 const hasAnyStats = computed(() =>
-  stabilityList.value.some(item => item.metrics.hasData)
+  stabilityList.value.some(item => item.metrics.hasData || item.metrics.skipped > 0)
 )
 
 const pct = (r) => (r == null ? '--' : Math.round(r * 100) + '%')
@@ -611,7 +614,7 @@ const handleRecentError = () => {
         <div class="advanced-body" :class="{ open: advancedOpen }">
           <div class="advanced-body-inner">
             <h3 class="section-title">稳定性统计</h3>
-            <p class="section-hint">记录每次翻译引擎调用的成功/失败，与日志等级无关，始终记录。成功率可反映各引擎当前可用性，帮助优化故障转移顺序。</p>
+            <p class="section-hint">记录每次翻译引擎实际调用的成功/失败，跳过（未配置或服务未加载）单独计数且不计入成功率。与日志等级无关。</p>
 
             <div class="stability-viewer">
               <div class="stability-viewer-header">
@@ -640,6 +643,10 @@ const handleRecentError = () => {
                     <span class="stability-stat">共 {{ item.metrics.total }} 次</span>
                     <span class="stability-stat stability-stat-success">成功 {{ item.metrics.success }}</span>
                     <span class="stability-stat stability-stat-failure">失败 {{ item.metrics.failure }}</span>
+                    <span
+                      class="stability-stat stability-stat-skip"
+                      :title="'环境 ' + item.metrics.skipEnv + ' / 配置 ' + item.metrics.skipConfig"
+                    >跳过 {{ item.metrics.skipped }}</span>
                     <span v-if="item.metrics.hasData && item.metrics.recentSamples >= 5" class="stability-stat-recent">
                       近期 {{ pct(item.metrics.recentRate) }}
                       <span class="stability-stat-recent-count">({{ item.metrics.recentSamples }}/{{ ENGINE_STATS_RECENT_WINDOW }})</span>
@@ -654,7 +661,7 @@ const handleRecentError = () => {
             </div>
 
             <h3 class="section-title">日志管理</h3>
-            <p class="section-hint">记录翻译引擎调用失败等事件，便于排查问题与提 issue。仅保留最近记录。</p>
+            <p class="section-hint">仅保留引擎、错误类别、状态码、阶段等最少元数据，不含原文、凭据或响应正文。仅保留最近记录。</p>
 
             <div class="log-config-row">
               <div class="log-config-item">
@@ -693,7 +700,13 @@ const handleRecentError = () => {
                   <span class="log-level-tag">{{ levelLabel(entry.level) }}</span>
                   <span class="log-engine">{{ engineName(entry.engine) }}</span>
                   <div class="log-message">{{ entry.message }}</div>
-                  <div v-if="entry.detail" class="log-detail">{{ entry.detail }}</div>
+                  <div v-if="entry.category || entry.statusCode || entry.phase || entry.skipReason" class="log-detail">
+                    <span v-if="entry.category">类别 {{ entry.category }}</span>
+                    <span v-if="entry.statusCode"> · 状态 {{ entry.statusCode }}</span>
+                    <span v-if="entry.phase"> · 阶段 {{ entry.phase }}</span>
+                    <span v-if="entry.skipReason"> · 跳过 {{ entry.skipReason }}</span>
+                    <span v-if="entry.requestId != null"> · 请求 {{ entry.requestId }}</span>
+                  </div>
                 </div>
               </div>
             </div>
@@ -1652,6 +1665,7 @@ const handleRecentError = () => {
 
 .stability-stat-success { color: #10b981; }
 .stability-stat-failure { color: #ef4444; }
+.stability-stat-skip { color: #64748b; }
 
 .stability-stat-recent {
   font-size: 11px;

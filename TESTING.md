@@ -1,10 +1,15 @@
 # 开发者翻译插件 - 测试指南
 
-## 开发环境已启动
+开发服务器端口是 **5175**（`pnpm dev`，与 `public/plugin.json` 的 `development.main` 一致）。下文若出现 5173 视为过时。
 
-开发服务器已成功启动：
-- 地址：http://localhost:5173/
-- 状态：运行中
+机器验证：
+
+```bash
+pnpm test    # 隔离用例
+pnpm build   # 产物；须含 dist/preload/services.js 与 dist/preload/node_modules/google-translate-api-x（真实目录）
+```
+
+已安装插件 preload 桥接故障的重装与验收：见 `docs/2026-0929-翻译引擎桥接-实施与验收.md`。开发插件（选仓库根）和已安装 `.asar`（须用 `dist/`）不是同一实例。
 
 ## 如何在 uTools 中测试
 
@@ -18,8 +23,8 @@
 2. 输入 "插件管理" 或 "plugin"
 3. 点击右上角的 "开发者" 按钮
 4. 点击 "添加开发插件"
-5. 选择项目目录：`<项目根目录>`
-6. uTools 会自动加载 `public/plugin.json` 配置
+5. 开发调试选择**项目根目录**（加载 `public/plugin.json` + `http://localhost:5175`）
+6. 核对已安装/打包形态时选择 **`dist/`** 目录，不要只以开发服务器可用当作安装版已修复
 
 ### 3. 测试功能
 
@@ -153,15 +158,15 @@ pnpm build
 ### 插件无法加载
 
 1. 检查 `plugin.json` 格式是否正确
-2. 确认开发服务器正在运行（http://localhost:5173/）
+2. 确认开发服务器正在运行（http://localhost:5175/）
 3. 在 uTools 开发者工具中查看错误日志
 
 ### 翻译失败
 
-1. 检查浏览器控制台错误信息
-2. 确认 uTools AI 服务已配置
-3. 检查网络连接
-4. 查看 AI API 调用额度
+1. 若提示「翻译服务未加载」，当前打开的可能是旧安装包：按 `docs/2026-0929-翻译引擎桥接-实施与验收.md` 用 `dist/` 重载或重装，不要只看开发服务器
+2. 检查 uTools 控制台是否有 preload 初始化异常；确认 `window.services` 方法是否齐全
+3. 确认 uTools AI 服务已配置，或其它引擎已填写 Key/地址
+4. 检查网络连接；uTools AI 出现 524 会自动尝试下一引擎，不代表 preload 故障
 
 ### 样式显示异常
 

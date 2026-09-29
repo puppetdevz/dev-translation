@@ -10,7 +10,14 @@ import {
 } from './prompts/index.js'
 import { useSettings } from './utils/useSettings.js'
 import { logger } from './utils/logger.js'
-import { recordEngineResult } from './utils/engineStats.js'
+import { recordEngineResult, recordEngineSkip } from './utils/engineStats.js'
+import {
+  runEngineFailover,
+  safeLookupWord,
+  engineDisplayName,
+  SKIP_REASON,
+  PHASE,
+} from './utils/engineBridge.js'
 
 const props = defineProps({
   enterAction: {
@@ -79,7 +86,7 @@ const runDetection = (text) => {
           detectedLanguage.value = lang
         }
       } catch (err) {
-        console.warn('AI 语言检测失败:', err && err.message)
+        logger.warn('ai', 'AI 语言检测失败', { category: 'unknown', phase: 'call' })
       }
     }, 500)
   } else {
@@ -199,15 +206,8 @@ const parseResult = (aiResponse, type) => {
   throw new Error('无法解析翻译结果，请重试')
 }
 
-// 仅当译文为单个英文单词时才查词典；多词短语 dictionaryapi.dev 不收录会 404
-// 用于 zh→en 单词模式：译文可能是 "develop software" 这样的多词短语，强行查词典必然失败且浪费请求
-const lookupWordIfSingle = async (text) => {
-  const trimmed = (text || '').trim()
-  if (!trimmed || /\s+/.test(trimmed)) {
-    return { phonetic: '', definitions: [], examples: [] }
-  }
-  return window.services.lookupWord(trimmed)
-}
+// 词典为可选能力：桥接缺失或查询失败时返回空音标/释义/例句，不把已成功的主译文误报为失败。
+const lookupWordIfSingle = (text) => safeLookupWord(text)
 
 const translateWithGoogle = async () => {
   const lang = detectedLanguage.value || detectLanguage(inputText.value)
@@ -215,10 +215,6 @@ const translateWithGoogle = async () => {
 
   const type = detectInputType(inputText.value)
   inputType.value = type
-
-  if (!window.services || !window.services.googleTranslate) {
-    throw new Error('Google 翻译不可用，请切换至其他引擎')
-  }
 
   const isEnToZh = lang === 'en'
 
@@ -232,7 +228,7 @@ const translateWithGoogle = async () => {
   if (isEnToZh) {
     const [translation, dict] = await Promise.all([
       window.services.googleTranslate(inputText.value.trim(), 'en', 'zh-CN'),
-      window.services.lookupWord(inputText.value.trim()),
+      lookupWordIfSingle(inputText.value.trim()),
     ])
     return {
       translation,
@@ -273,7 +269,7 @@ const translateWithDictEngine = async (translateFn) => {
   if (isEnToZh) {
     const [translation, dict] = await Promise.all([
       translateFn(inputText.value.trim(), 'en', 'zh-CN'),
-      window.services.lookupWord(inputText.value.trim()),
+      lookupWordIfSingle(inputText.value.trim()),
     ])
     return {
       translation,
@@ -293,11 +289,8 @@ const translateWithDictEngine = async (translateFn) => {
   }
 }
 
-// DeepL 官方 API 翻译（独立顶级引擎）
+// DeepL 官方 API 翻译（独立顶级引擎）。桥接可用性由 inspectEngine 在调度前检查。
 const translateWithDeepL = async () => {
-  if (!window.services || !window.services.deeplTranslate) {
-    throw new Error('DeepL 官方 API 不可用')
-  }
   return translateWithDictEngine(
     (text, from, to) => window.services.deeplTranslate(text, from, to, settings.deeplApiKey)
   )
@@ -305,9 +298,6 @@ const translateWithDeepL = async () => {
 
 // DeepLX 翻译（自部署/公共实例，独立顶级引擎）
 const translateWithDeepLX = async () => {
-  if (!window.services || !window.services.deeplxTranslate) {
-    throw new Error('DeepLX 不可用')
-  }
   return translateWithDictEngine(
     (text, from, to) => window.services.deeplxTranslate(text, from, to, settings.deeplxServerUrl, settings.deeplxToken)
   )
@@ -336,9 +326,6 @@ const translateWithAI = async () => {
 // 自定义 AI 翻译（OpenAI 兼容协议，系统提示词追加到默认指令）
 const translateWithThirdpartyAI = async () => {
   const { thirdpartyAiUrl, thirdpartyAiKey, thirdpartyAiModel, thirdpartyAiSystemPrompt } = settings
-  if (!thirdpartyAiUrl || !thirdpartyAiModel) {
-    throw new Error('自定义 AI 未配置完整（需填写 API 链接和模型名）')
-  }
 
   const lang = detectedLanguage.value || detectLanguage(inputText.value)
   detectedLanguage.value = lang
@@ -364,20 +351,8 @@ const translateWithThirdpartyAI = async () => {
     { model: thirdpartyAiModel, messages, stream: false }
   )
 
-  // OpenAI 兼容协议在鉴权失败/限流/模型不存在时返回 {error:{message,...}} 而非 choices
-  // 先检查 error 字段，抛出含真实信息的错误（而非笼统的"返回空结果"），便于诊断
   if (data && data.error) {
-    const errMsg = (typeof data.error === 'object' && data.error.message) || JSON.stringify(data.error)
-    const err = new Error(`自定义 AI 错误: ${errMsg}`)
-    // postJson 此处未抛错（HTTP 200），手动补充请求上下文供日志诊断
-    err.request = {
-      method: 'POST',
-      url: thirdpartyAiUrl,
-      model: thirdpartyAiModel,
-      messages: messages.map(m => ({ role: m.role, content: m.content }))
-    }
-    err.response = data
-    throw err
+    throw new Error('自定义 AI 返回错误')
   }
 
   const content = data?.choices?.[0]?.message?.content || ''
@@ -423,76 +398,84 @@ const translate = async () => {
   const myRequestId = ++translateRequestId
 
   try {
-    // 按 failoverOrder 顺序依次尝试引擎，首位是主引擎
     const order = (settings.failoverOrder && Array.isArray(settings.failoverOrder) && settings.failoverOrder.length > 0)
       ? settings.failoverOrder
       : ['ai']
 
-    const engineName = (e) => ({ ai: 'uTools AI', 'thirdparty-ai': '自定义 AI', google: 'Google 翻译', deepl: 'DeepL 官方', deeplx: 'DeepLX 自部署' })[e] || e
-    let lastErr = null
-
-    for (let i = 0; i < order.length; i++) {
-      // 每个引擎尝试前再次校验，若已有更新请求发起则中止本次（避免并发翻译互相干扰）
-      if (myRequestId !== translateRequestId) {
-        return
-      }
-      const engine = order[i]
-      try {
-        logger.debug(engine, `尝试翻译（优先级 P${i + 1}）`, { text: inputText.value.trim().slice(0, 100) })
-        const result = await translateWithEngine(engine)
-        // 回填前校验令牌：若期间用户发起了新翻译或清空了输入，丢弃本次陈旧结果
-        if (myRequestId !== translateRequestId) {
+    const outcome = await runEngineFailover({
+      order,
+      settings,
+      translateWith: translateWithEngine,
+      isCurrent: () => myRequestId === translateRequestId,
+      onSkip: (engine, inspection, meta) => {
+        recordEngineSkip(engine, inspection.skipCategory)
+        if (inspection.skipReason === SKIP_REASON.BRIDGE_MISSING) {
+          if (meta && meta.notifyOnce) {
+            logger.error('system', '翻译服务未加载', {
+              category: inspection.category,
+              skipReason: inspection.skipReason,
+              skipCategory: inspection.skipCategory,
+              phase: PHASE.SKIP,
+              requestId: myRequestId,
+            })
+          }
           return
         }
+        logger.warn(engine, inspection.safeMessage, {
+          category: inspection.category,
+          skipReason: inspection.skipReason,
+          skipCategory: inspection.skipCategory,
+          phase: PHASE.SKIP,
+          requestId: myRequestId,
+        })
+      },
+      onFailure: (engine, classified) => {
+        recordEngineResult(engine, false)
+        logger.error(engine, classified.safeMessage, {
+          category: classified.category,
+          statusCode: classified.statusCode,
+          phase: PHASE.CALL,
+          requestId: myRequestId,
+        })
+      },
+      onSuccess: (engine, result, index) => {
         translationResult.value = result
         usedEngine.value = engine
-        logger.info(engine, '翻译成功')
+        logger.info(engine, '翻译成功', { phase: PHASE.CALL, requestId: myRequestId })
         recordEngineResult(engine, true)
-        // 非首个引擎成功时，显示降级提示
-        if (i > 0) {
-          fallbackNotice.value = `${engineName(order[0])} 不可用，已切换到 ${engineName(engine)}`
+        if (index > 0) {
+          fallbackNotice.value = `${engineDisplayName(order[0])} 不可用，已切换到 ${engineDisplayName(engine)}`
           if (fallbackTimer) clearTimeout(fallbackTimer)
           fallbackTimer = setTimeout(() => {
             fallbackNotice.value = ''
             fallbackTimer = null
           }, 3000)
         }
-        return
-      } catch (err) {
-        // 若期间已发起新请求，不再继续轮试旧请求
-        if (myRequestId !== translateRequestId) {
-          return
-        }
-        console.warn(`${engineName(engine)} 翻译失败:`, err.message)
-        // 失败时把实际请求/响应附入日志详情，便于诊断（HTTP 错误、鉴权失败、超时等）
-        const errDetail = { message: err.message, stack: err.stack || '' }
-        if (err.request) errDetail.request = err.request
-        if (err.response) errDetail.response = err.response
-        logger.error(engine, `${engineName(engine)} 翻译失败`, errDetail)
-        recordEngineResult(engine, false)
-        lastErr = err
-        // 继续尝试下一个引擎
-      }
-    }
-    // 全部失败
-    if (myRequestId !== translateRequestId) {
+      },
+    })
+
+    if (outcome.stale || myRequestId !== translateRequestId) {
       return
     }
-    error.value = lastErr ? (lastErr.message || '翻译失败，请重试') : '翻译失败，请重试'
-    const allFailDetail = { text: inputText.value.trim().slice(0, 100), error: lastErr?.message || '' }
-    if (lastErr && lastErr.request) allFailDetail.request = lastErr.request
-    if (lastErr && lastErr.response) allFailDetail.response = lastErr.response
-    logger.error('system', '所有引擎均失败', allFailDetail)
+    if (outcome.success) {
+      return
+    }
+    error.value = outcome.message || '翻译失败，请重试'
+    logger.error('system', outcome.message || '所有引擎均失败', {
+      category: 'unknown',
+      phase: PHASE.FALLBACK,
+      requestId: myRequestId,
+    })
   } catch (err) {
     if (myRequestId !== translateRequestId) {
       return
     }
-    console.error('Translation error:', err)
-    error.value = err.message || '翻译失败，请重试'
-    const flowErrDetail = { message: err.message, stack: err.stack || '' }
-    if (err.request) flowErrDetail.request = err.request
-    if (err.response) flowErrDetail.response = err.response
-    logger.error('system', '翻译流程异常', flowErrDetail)
+    error.value = '翻译失败，请重试'
+    logger.error('system', '翻译流程异常', {
+      category: 'unknown',
+      phase: PHASE.CALL,
+      requestId: myRequestId,
+    })
   } finally {
     // 仅当本次仍是最新请求时才解除 loading，避免新请求的 loading 被旧请求清掉
     if (myRequestId === translateRequestId) {
@@ -540,9 +523,8 @@ const polish = async () => {
     originalText.value = inputText.value
     polishedText.value = polished
   } catch (err) {
-    console.error('Polish error:', err)
-    logger.error('ai', '文本润色失败', { message: err.message, stack: err.stack || '' })
-    error.value = err.message || '润色失败，请重试'
+    logger.error('ai', '文本润色失败', { category: 'unknown', phase: PHASE.CALL })
+    error.value = '润色失败，请重试'
   } finally {
     isPolishing.value = false
   }
@@ -651,9 +633,9 @@ watch(inputText, (newValue) => {
     // 注意：不在 watch 中提前 detectInputType —— 该值仅在 translate 时被消费（translateWithX 内部统一设置），
     // 此处提前计算每次按键都同步跑多正则是浪费；ResultDisplay 也仅在 result 存在时才读取 inputType
   } else {
-    // 输入为空时，重置所有状态
-    // 关键：清除挂起的检测定时器，否则 AI 策略下已 schedule 的 setTimeout 会在 500ms 后触发并回填 detectedLanguage
+    // 输入为空时，重置所有状态，并使进行中的翻译请求失效，避免旧结果回填
     cancelDetection()
+    translateRequestId++
     isManualOverride.value = false
     detectedLanguage.value = ''
     inputType.value = 'word'

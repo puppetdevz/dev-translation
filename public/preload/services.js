@@ -2,7 +2,20 @@ const fs = require('node:fs')
 const path = require('node:path')
 const https = require('https')
 const http = require('http')
-const translate = require('google-translate-api-x')
+
+// google-translate-api-x 为可选源：安装包若未带上该依赖，不得阻断整个 window.services 初始化。
+let googleLibrary = null
+let googleLibraryTried = false
+function getGoogleLibrary () {
+  if (googleLibraryTried) return googleLibrary
+  googleLibraryTried = true
+  try {
+    googleLibrary = require('google-translate-api-x')
+  } catch (e) {
+    googleLibrary = null
+  }
+  return googleLibrary
+}
 
 const EMPTY_DICT_RESULT = { phonetic: '', definitions: [], examples: [] }
 
@@ -39,67 +52,24 @@ function setCache (key, value) {
 const TIMEOUT_MS = 5000
 const BROWSER_UA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
 
-// ===== 请求诊断上下文（仅用于失败日志，敏感信息脱敏） =====
-// 目的：翻译调用失败时，把"实际发出的请求"附在 Error 上，供上层 logger 打印诊断。
-// 脱敏策略：Authorization 头与服务端 token 仅保留首 2 + 末 4 字符，中间以 ... 占位，
-// 既能让用户核对配置是否填对，又不把完整凭据写入本地日志。
-
-/** 脱敏单个敏感字符串：保留首 2 + 末 4，中间以 ... 占位 */
-function maskMiddle (s) {
-  if (s == null) return s
-  s = String(s)
-  if (s.length <= 8) return s
-  return s.slice(0, 2) + '...' + s.slice(-4)
-}
-
-/** 脱敏带前缀的凭据（如 'Bearer sk-xxx'、'DeepL-Auth-Key xxx'） */
-function maskSecret (s) {
-  if (s == null) return s
-  s = String(s)
-  const PREFIXES = ['DeepL-Auth-Key ', 'Bearer ']
-  for (const p of PREFIXES) {
-    if (s.startsWith(p)) return p + maskMiddle(s.slice(p.length))
-  }
-  return maskMiddle(s)
-}
-
-/** 脱敏 URL 路径中的 token 段（形如 https://host/<token>/translate） */
-function maskUrlToken (url) {
-  if (!url) return url
-  try {
-    const u = new URL(url)
-    const segs = u.pathname.split('/').filter(Boolean)
-    if (segs.length >= 2 && segs[segs.length - 1] === 'translate') {
-      segs[segs.length - 2] = maskMiddle(segs[segs.length - 2])
-      return `${u.protocol}//${u.host}/${segs.join('/')}${u.search}`
-    }
-  } catch (e) { /* 非 URL 原样返回 */ }
-  return url
-}
-
-/** 构建可安全记录的请求上下文（headers 脱敏，body 原样保留以便诊断） */
-function buildRequestContext (method, url, headers, body) {
-  const safeHeaders = {}
-  if (headers) {
-    for (const [k, v] of Object.entries(headers)) {
-      safeHeaders[k] = /^authorization$/i.test(k) ? maskSecret(v) : v
-    }
-  }
-  const ctx = { method, url: maskUrlToken(url), headers: safeHeaders }
-  if (body !== undefined) ctx.body = body
-  return ctx
-}
-
-/** 把请求/响应诊断信息附到 Error 上（幂等：已存在则跳过） */
-function attachDiagnostics (err, request, response) {
+/** 只把状态码附到 Error 上，不附 URL/请求体/响应正文/凭据 */
+function attachStatus (err, statusCode) {
   if (!err || typeof err !== 'object') return err
-  if (request && !err.request) err.request = request
-  if (response && !err.response) err.response = response
+  const code = Number(statusCode)
+  if (Number.isFinite(code) && code >= 100 && code <= 599 && err.statusCode == null) {
+    err.statusCode = code
+  }
   return err
 }
 
+function httpStatusError (statusCode) {
+  const e = new Error('HTTP ' + statusCode)
+  attachStatus(e, statusCode)
+  return e
+}
+
 // ===== 通用 HTTPS GET JSON 请求（带超时） =====
-// 用于 Google 翻译 gtx / clients5 端点；失败时把请求上下文附到 Error 供日志诊断。
+// 用于 Google 翻译 gtx / clients5 端点。错误只暴露状态码，不含 URL/正文。
 function httpsGetJson (url, extraHeaders, timeoutMs = TIMEOUT_MS) {
   return new Promise((resolve, reject) => {
     let settled = false
@@ -108,13 +78,11 @@ function httpsGetJson (url, extraHeaders, timeoutMs = TIMEOUT_MS) {
       'Accept': 'application/json, text/plain, */*'
     }, extraHeaders || {})
 
-    const reqContext = buildRequestContext('GET', url, headers)
-
-    const fail = (err, response) => {
+    const fail = (err, statusCode) => {
       if (settled) return
       settled = true
       clearTimeout(timer)
-      attachDiagnostics(err, reqContext, response)
+      attachStatus(err, statusCode)
       reject(err)
     }
 
@@ -127,25 +95,20 @@ function httpsGetJson (url, extraHeaders, timeoutMs = TIMEOUT_MS) {
       let data = ''
       res.on('data', chunk => { data += chunk })
       res.on('error', (err) => {
-        fail(err, { status: res.statusCode, body: data.slice(0, 500) })
+        fail(err, res.statusCode)
       })
       res.on('end', () => {
         if (settled) return
         settled = true
         clearTimeout(timer)
-        // HTTP 错误状态码：构造含状态码与响应片段的错误，便于上层诊断真实原因（4xx/5xx）
         if (res.statusCode && res.statusCode >= 400) {
-          const e = new Error(`HTTP ${res.statusCode}: ${data.slice(0, 200)}`)
-          attachDiagnostics(e, reqContext, { status: res.statusCode, body: data.slice(0, 500) })
-          reject(e)
+          reject(httpStatusError(res.statusCode))
           return
         }
         try {
           resolve(JSON.parse(data))
         } catch (err) {
-          const e = new Error('响应解析失败: ' + err.message + (data ? ' (body: ' + data.slice(0, 120) + ')' : ''))
-          attachDiagnostics(e, reqContext, { status: res.statusCode, body: data.slice(0, 500) })
-          reject(e)
+          reject(attachStatus(new Error('响应解析失败'), res.statusCode))
         }
       })
     })
@@ -199,9 +162,6 @@ function postJson (url, body, extraHeaders, timeoutMs = TIMEOUT_MS) {
       'Accept': 'application/json'
     }, extraHeaders || {})
 
-    // 请求诊断上下文（脱敏后），失败时附加到 Error 供上层日志打印
-    const reqContext = buildRequestContext('POST', url, headers, body)
-
     const options = {
       hostname: urlObj.hostname,
       port: urlObj.port || (isHttps ? 443 : 80),
@@ -210,11 +170,11 @@ function postJson (url, body, extraHeaders, timeoutMs = TIMEOUT_MS) {
       headers
     }
 
-    const fail = (err, response) => {
+    const fail = (err, statusCode) => {
       if (settled) return
       settled = true
       clearTimeout(timer)
-      attachDiagnostics(err, reqContext, response)
+      attachStatus(err, statusCode)
       reject(err)
     }
 
@@ -227,25 +187,20 @@ function postJson (url, body, extraHeaders, timeoutMs = TIMEOUT_MS) {
       let data = ''
       res.on('data', chunk => { data += chunk })
       res.on('error', (err) => {
-        fail(err, { status: res.statusCode, body: data.slice(0, 500) })
+        fail(err, res.statusCode)
       })
       res.on('end', () => {
         if (settled) return
         settled = true
         clearTimeout(timer)
-        // HTTP 错误状态码：构造含状态码与响应片段的错误，便于上层诊断（如 DeepL 403 key 无效、429 限流、DeepLX 401 鉴权）
         if (res.statusCode && res.statusCode >= 400) {
-          const e = new Error(`HTTP ${res.statusCode}: ${data.slice(0, 200)}`)
-          attachDiagnostics(e, reqContext, { status: res.statusCode, body: data.slice(0, 500) })
-          reject(e)
+          reject(httpStatusError(res.statusCode))
           return
         }
         try {
           resolve(JSON.parse(data))
         } catch (err) {
-          const e = new Error('响应解析失败: ' + err.message + (data ? ' (body: ' + data.slice(0, 120) + ')' : ''))
-          attachDiagnostics(e, reqContext, { status: res.statusCode, body: data.slice(0, 500) })
-          reject(e)
+          reject(attachStatus(new Error('响应解析失败'), res.statusCode))
         }
       })
     })
@@ -277,13 +232,11 @@ function httpGetJson (url, extraHeaders, timeoutMs = TIMEOUT_MS) {
       'Accept': 'application/json'
     }, extraHeaders || {})
 
-    const reqContext = buildRequestContext('GET', url, headers)
-
-    const fail = (err, response) => {
+    const fail = (err, statusCode) => {
       if (settled) return
       settled = true
       clearTimeout(timer)
-      attachDiagnostics(err, reqContext, response)
+      attachStatus(err, statusCode)
       reject(err)
     }
 
@@ -296,25 +249,20 @@ function httpGetJson (url, extraHeaders, timeoutMs = TIMEOUT_MS) {
       let data = ''
       res.on('data', chunk => { data += chunk })
       res.on('error', (err) => {
-        fail(err, { status: res.statusCode, body: data.slice(0, 500) })
+        fail(err, res.statusCode)
       })
       res.on('end', () => {
         if (settled) return
         settled = true
         clearTimeout(timer)
-        // HTTP 错误状态码：构造含状态码与响应片段的错误，便于上层诊断（如 401 key 无效）
         if (res.statusCode && res.statusCode >= 400) {
-          const e = new Error(`HTTP ${res.statusCode}: ${data.slice(0, 200)}`)
-          attachDiagnostics(e, reqContext, { status: res.statusCode, body: data.slice(0, 500) })
-          reject(e)
+          reject(httpStatusError(res.statusCode))
           return
         }
         try {
           resolve(JSON.parse(data))
         } catch (err) {
-          const e = new Error('响应解析失败: ' + err.message + (data ? ' (body: ' + data.slice(0, 120) + ')' : ''))
-          attachDiagnostics(e, reqContext, { status: res.statusCode, body: data.slice(0, 500) })
-          reject(e)
+          reject(attachStatus(new Error('响应解析失败'), res.statusCode))
         }
       })
     })
@@ -333,6 +281,10 @@ function httpGetJson (url, extraHeaders, timeoutMs = TIMEOUT_MS) {
 
 // ===== 翻译源 1：google-translate-api-x 库（内部 batch + single 双端点回退） =====
 async function sourceLibrary (text, from, to) {
+  const translate = getGoogleLibrary()
+  if (!translate) {
+    throw new Error('库不可用')
+  }
   // 用 AbortController 接入库的 requestOptions.signal，超时后真正取消底层 fetch，
   // 避免 socket 在事件循环中堆积造成 fd 泄漏与持续触发 Google 端 429 限流
   const controller = new AbortController()
@@ -405,29 +357,18 @@ const TRANSLATE_SOURCES = [
 ]
 
 async function translateWithSources (text, from, to) {
-  const errors = []
-  // 收集每个源的请求诊断上下文（若失败），附到聚合错误供上层日志打印
-  const sourceContexts = []
+  let lastStatus = null
   for (const source of TRANSLATE_SOURCES) {
     try {
       const result = await source.fn(text, from, to)
       if (result) return result
-      errors.push(`${source.name}: 返回空`)
     } catch (err) {
-      const entry = `${source.name}: ${err.message || String(err)}`
-      errors.push(entry)
-      sourceContexts.push({
-        source: source.name,
-        message: err.message || String(err),
-        request: err.request || null,
-        response: err.response || null,
-      })
-      // 继续尝试下一个源
+      const code = Number(err && err.statusCode)
+      if (Number.isFinite(code)) lastStatus = code
     }
   }
-  const aggErr = new Error('所有谷歌翻译源均失败 (' + errors.join('; ') + ')')
-  // 聚合请求上下文：汇总三个源的实际请求，方便一次性诊断
-  aggErr.request = { engine: 'google', from, to, text: text.slice(0, 100), sources: sourceContexts }
+  const aggErr = new Error('所有谷歌翻译源均失败')
+  attachStatus(aggErr, lastStatus)
   throw aggErr
 }
 
@@ -516,10 +457,11 @@ async function translateWithDeepLX (text, from, to, serverUrl, token) {
   // token 走 URL 路径，无需 Authorization header
   const data = await postJson(endpoint, body)
 
-  // DeepLX 响应格式: { code, data, ... }
+  // DeepLX 响应格式: { code, data, ... }。失败不回传服务端 message，避免把原文/令牌写入日志。
   if (!data || data.code !== 200 || !data.data) {
-    const msg = (data && data.message) || `HTTP ${data && data.code}`
-    throw new Error('DeepLX 翻译失败: ' + msg)
+    const e = new Error('DeepLX 返回空结果')
+    attachStatus(e, data && data.code)
+    throw e
   }
   return data.data
 }
