@@ -42,6 +42,13 @@ const handleBack = () => {
   router.push({ name: 'translate' })
 }
 
+const SETTINGS_CATEGORIES = [
+  { id: 'general', label: '常规' },
+  { id: 'engine', label: '引擎' },
+  { id: 'advanced', label: '高级' },
+]
+const activeCategory = ref('general')
+
 const handleStrategySelect = (strategy) => {
   updateSetting('detectionStrategy', strategy)
 }
@@ -613,6 +620,12 @@ const deeplOutputs = [
   { key: 'showVariableNaming', label: '显示变量命名', desc: '基于翻译结果生成 5 种编程命名格式' },
 ]
 
+const currentOutputs = computed(() => {
+  if (mainEngine.value === 'ai' || mainEngine.value === 'thirdparty-ai') return aiOutputs
+  if (mainEngine.value === 'deepl' || mainEngine.value === 'deeplx') return deeplOutputs
+  return googleOutputs
+})
+
 // -- 日志管理 --
 const engineName = (e) => ({ ai:'uTools AI', 'thirdparty-ai':'自定义 AI', google:'Google 翻译', deepl:'DeepL 官方', deeplx:'DeepLX 自部署', system:'系统' })[e] || e
 
@@ -702,8 +715,14 @@ const handleClearStats = () => {
 
 onMounted(() => { refreshLogs(); refreshEngineStats() })
 
-const advancedOpen = ref(false)
-const toggleAdvanced = () => { advancedOpen.value = !advancedOpen.value; refreshEngineStats() }
+const selectCategory = (id) => {
+  if (activeCategory.value === id) return
+  activeCategory.value = id
+  if (id === 'advanced') {
+    refreshEngineStats()
+    refreshLogs()
+  }
+}
 
 const recentErrorId = ref(null)
 const hasErrorLog = computed(() => logs.value.some(l => l.level === 'error'))
@@ -725,41 +744,103 @@ const handleRecentError = () => {
 <template>
   <div class="settings-page">
     <div class="settings-topbar">
-      <button class="back-btn" @click="handleBack">
+      <button class="back-btn" type="button" aria-label="返回翻译页" @click="handleBack">
         <span>←</span>
       </button>
       <span class="topbar-title">设置</span>
     </div>
 
-    <div class="settings-body">
-      <div class="settings-section">
-        <h3 class="section-title">语言检测策略</h3>
-        <div class="strategy-list">
-          <div
-            class="strategy-item"
-            :class="{ active: settings.detectionStrategy === 'regex' }"
-            @click="handleStrategySelect('regex')"
-          >
-            <div class="strategy-info">
-              <span class="strategy-name">正则算法</span>
-              <span class="strategy-desc">基于字符占比快速识别，无需 AI 调用</span>
+    <div class="settings-shell">
+      <nav class="settings-nav" role="tablist" aria-label="设置分类">
+        <button
+          v-for="cat in SETTINGS_CATEGORIES"
+          :id="'settings-tab-' + cat.id"
+          :key="cat.id"
+          type="button"
+          class="settings-nav-item"
+          :class="{ active: activeCategory === cat.id }"
+          role="tab"
+          :aria-selected="activeCategory === cat.id ? 'true' : 'false'"
+          :aria-controls="'settings-panel-' + cat.id"
+          @click="selectCategory(cat.id)"
+        >{{ cat.label }}</button>
+      </nav>
+
+      <div class="settings-content">
+        <div
+          id="settings-panel-general"
+          class="settings-panel"
+          :class="{ 'is-active': activeCategory === 'general' }"
+          role="tabpanel"
+          aria-labelledby="settings-tab-general"
+          :aria-hidden="activeCategory === 'general' ? 'false' : 'true'"
+        >
+          <div class="settings-section">
+            <h3 class="section-title">语言检测策略</h3>
+            <div class="strategy-list">
+              <button
+                type="button"
+                class="strategy-item"
+                :class="{ active: settings.detectionStrategy === 'regex' }"
+                @click="handleStrategySelect('regex')"
+              >
+                <div class="strategy-info">
+                  <span class="strategy-name">正则算法</span>
+                  <span class="strategy-desc">基于字符占比快速识别，无需 AI 调用</span>
+                </div>
+                <span class="strategy-check" v-if="settings.detectionStrategy === 'regex'">✓</span>
+              </button>
+              <button
+                type="button"
+                class="strategy-item"
+                :class="{ active: settings.detectionStrategy === 'ai' }"
+                @click="handleStrategySelect('ai')"
+              >
+                <div class="strategy-info">
+                  <span class="strategy-name">AI 模型</span>
+                  <span class="strategy-desc">调用 AI 识别，更准确（有延迟）</span>
+                </div>
+                <span class="strategy-check" v-if="settings.detectionStrategy === 'ai'">✓</span>
+              </button>
             </div>
-            <span class="strategy-check" v-if="settings.detectionStrategy === 'regex'">✓</span>
           </div>
-          <div
-            class="strategy-item"
-            :class="{ active: settings.detectionStrategy === 'ai' }"
-            @click="handleStrategySelect('ai')"
-          >
-            <div class="strategy-info">
-              <span class="strategy-name">AI 模型</span>
-              <span class="strategy-desc">调用 AI 识别，更准确（有延迟）</span>
+
+          <div class="settings-section">
+            <h3 class="section-title">输出设置</h3>
+            <p class="section-hint">选项由当前主引擎决定（故障转移顺序的首位），与引擎页选中的配置卡无关。</p>
+            <div class="outputs-list">
+              <div
+                v-for="item in currentOutputs"
+                :key="item.key"
+                class="output-item"
+              >
+                <div class="output-info">
+                  <span class="output-name">{{ item.label }}</span>
+                  <span class="output-desc">{{ item.desc }}</span>
+                </div>
+                <button
+                  type="button"
+                  class="toggle-switch"
+                  :class="{ active: settings[item.key] }"
+                  :aria-pressed="settings[item.key] ? 'true' : 'false'"
+                  :aria-label="item.label"
+                  @click="toggleSetting(item.key)"
+                >
+                  <span class="toggle-slider"></span>
+                </button>
+              </div>
             </div>
-            <span class="strategy-check" v-if="settings.detectionStrategy === 'ai'">✓</span>
           </div>
         </div>
-      </div>
 
+        <div
+          id="settings-panel-engine"
+          class="settings-panel"
+          :class="{ 'is-active': activeCategory === 'engine' }"
+          role="tabpanel"
+          aria-labelledby="settings-tab-engine"
+          :aria-hidden="activeCategory === 'engine' ? 'false' : 'true'"
+        >
       <div class="settings-section">
         <h3 class="section-title">翻译引擎配置</h3>
         <p class="section-hint">拖拽列表调整故障转移顺序（首位为主引擎），点击查看引擎配置。</p>
@@ -846,7 +927,7 @@ const handleRecentError = () => {
             </template>
           </div>
 
-          <!-- 右列：选中引擎的具体配置 + 输出设置 -->
+          <!-- 右列：选中引擎的具体配置（与分类侧栏独立） -->
           <div class="engine-config-area">
             <Transition name="output-fade" mode="out-in">
               <div :key="selectedEngine" class="engine-config-content">
@@ -1033,42 +1114,21 @@ const handleRecentError = () => {
                   </Transition>
                   <p v-if="selectedEngine === 'thirdparty-ai'" class="deepl-config-hint" style="margin-top: 8px;">「测试配置」按组顺序测试整条组链，成功时指出实际命中的组；各组「测试」只测该组。真实请求可能消耗额度，不计入成功率、不改变顺序。</p>
                 </div>
-
-                <div class="config-divider"></div>
-
-                <!-- 输出设置：基于主引擎（failoverOrder[0]），不随选中引擎变化 -->
-                <div class="outputs-list">
-                  <div
-                    v-for="item in (mainEngine === 'ai' || mainEngine === 'thirdparty-ai') ? aiOutputs : (mainEngine === 'deepl' || mainEngine === 'deeplx') ? deeplOutputs : googleOutputs"
-                    :key="item.key"
-                    class="output-item"
-                  >
-                    <div class="output-info">
-                      <span class="output-name">{{ item.label }}</span>
-                      <span class="output-desc">{{ item.desc }}</span>
-                    </div>
-                    <button
-                      class="toggle-switch"
-                      :class="{ active: settings[item.key] }"
-                      @click="toggleSetting(item.key)"
-                    >
-                      <span class="toggle-slider"></span>
-                    </button>
-                  </div>
-                </div>
               </div>
             </Transition>
           </div>
         </div>
       </div>
-
-      <div class="advanced-section">
-        <div class="advanced-header" @click="toggleAdvanced">
-          <span class="advanced-title">高级</span>
-          <span class="advanced-arrow" :class="{ open: advancedOpen }">▶</span>
         </div>
-        <div class="advanced-body" :class="{ open: advancedOpen }">
-          <div class="advanced-body-inner">
+
+        <div
+          id="settings-panel-advanced"
+          class="settings-panel"
+          :class="{ 'is-active': activeCategory === 'advanced' }"
+          role="tabpanel"
+          aria-labelledby="settings-tab-advanced"
+          :aria-hidden="activeCategory === 'advanced' ? 'false' : 'true'"
+        >
             <h3 class="section-title">稳定性统计</h3>
             <p class="section-hint">记录每次翻译引擎实际调用的成功/失败，跳过（未配置或服务未加载）单独计数且不计入成功率。与日志等级无关。</p>
 
@@ -1168,10 +1228,8 @@ const handleRecentError = () => {
                 </div>
               </div>
             </div>
-          </div>
         </div>
       </div>
-
     </div>
   </div>
 </template>
@@ -1184,6 +1242,7 @@ const handleRecentError = () => {
   background: linear-gradient(135deg, #f8fafc 0%, #f1f5f9 100%);
   color: var(--text-primary, #1e293b);
   overflow: hidden;
+  box-sizing: border-box;
 }
 
 .settings-topbar {
@@ -1224,14 +1283,105 @@ const handleRecentError = () => {
   color: var(--text-primary, #1e293b);
 }
 
-.settings-body {
+.back-btn:focus-visible,
+.settings-nav-item:focus-visible,
+.strategy-item:focus-visible,
+.toggle-switch:focus-visible {
+  outline: 2px solid #6366f1;
+  outline-offset: 2px;
+}
+
+.settings-shell,
+.settings-nav,
+.settings-content,
+.settings-panel {
+  box-sizing: border-box;
+}
+
+.settings-shell {
   flex: 1;
+  min-width: 0;
+  min-height: 0;
+  display: grid;
+  grid-template-columns: 120px minmax(0, 1fr);
+  grid-template-rows: minmax(0, 1fr);
+}
+
+.settings-nav {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 12px 10px;
+  border-right: 1px solid rgba(226, 232, 240, 0.6);
+  background: rgba(255, 255, 255, 0.45);
+  overflow-y: auto;
+  overflow-x: hidden;
+  min-width: 0;
+  min-height: 0;
+}
+
+.settings-nav-item {
+  width: 100%;
+  padding: 8px 12px;
+  border: 1px solid transparent;
+  background: transparent;
+  border-radius: 10px;
+  font-family: inherit;
+  font-size: 13px;
+  font-weight: 600;
+  line-height: 1.4;
+  color: var(--text-secondary, #64748b);
+  text-align: left;
+  cursor: pointer;
+  transition: background 0.2s, color 0.2s, border-color 0.2s, opacity 0.2s;
+}
+
+.settings-nav-item:hover {
+  background: rgba(241, 245, 249, 1);
+  color: var(--text-primary, #1e293b);
+}
+
+.settings-nav-item.active {
+  background: rgba(99, 102, 241, 0.08);
+  border-color: rgba(99, 102, 241, 0.3);
+  color: #4f46e5;
+}
+
+.settings-content {
+  position: relative;
+  min-width: 0;
+  min-height: 0;
+  overflow: hidden;
+}
+
+.settings-panel {
+  position: absolute;
+  inset: 0;
+  min-width: 0;
+  overflow-x: hidden;
   overflow-y: auto;
   padding: 20px 16px;
+  visibility: hidden;
+  pointer-events: none;
+  z-index: 0;
+}
+
+.settings-panel.is-active {
+  visibility: visible;
+  pointer-events: auto;
+  z-index: 1;
+}
+
+.settings-panel > .section-title ~ .section-title {
+  margin-top: 20px;
 }
 
 .settings-section {
   margin-bottom: 24px;
+}
+
+.settings-section:last-child {
+  margin-bottom: 0;
 }
 
 .section-title {
@@ -1262,6 +1412,10 @@ const handleRecentError = () => {
   border-radius: 10px;
   cursor: pointer;
   transition: all 0.2s;
+  font-family: inherit;
+  text-align: left;
+  line-height: 1.4;
+  color: inherit;
 }
 
 .strategy-item:hover {
@@ -1298,11 +1452,12 @@ const handleRecentError = () => {
   flex-shrink: 0;
 }
 
-/* Engine left-right layout */
+/* Engine left-right layout — independent from category sidebar */
 .engine-layout {
   display: flex;
   gap: 16px;
   align-items: flex-start;
+  min-width: 0;
 }
 
 .engine-list {
@@ -1806,12 +1961,6 @@ const handleRecentError = () => {
 
 .test-fade-enter-from .engine-test-icon {
   transform: scale(0.3);
-}
-
-.config-divider {
-  height: 1px;
-  background: rgba(226, 232, 240, 0.6);
-  margin: 16px 0;
 }
 
 .deepl-config {
@@ -2318,15 +2467,18 @@ const handleRecentError = () => {
   transform: translateX(20px);
 }
 
-.settings-body::-webkit-scrollbar {
+.settings-panel::-webkit-scrollbar,
+.settings-nav::-webkit-scrollbar {
   width: 6px;
 }
 
-.settings-body::-webkit-scrollbar-track {
+.settings-panel::-webkit-scrollbar-track,
+.settings-nav::-webkit-scrollbar-track {
   background: transparent;
 }
 
-.settings-body::-webkit-scrollbar-thumb {
+.settings-panel::-webkit-scrollbar-thumb,
+.settings-nav::-webkit-scrollbar-thumb {
   background: rgba(0, 0, 0, 0.2);
   border-radius: 3px;
 }
@@ -2576,10 +2728,6 @@ const handleRecentError = () => {
     border-color: rgba(239, 68, 68, 0.28);
   }
 
-  .config-divider {
-    background: rgba(51, 65, 85, 0.6);
-  }
-
   .toggle-switch {
     background: rgba(71, 85, 105, 0.8);
   }
@@ -2710,8 +2858,29 @@ const handleRecentError = () => {
     border-color: #6366f1;
   }
 
-  .settings-body::-webkit-scrollbar-thumb {
+  .settings-panel::-webkit-scrollbar-thumb,
+  .settings-nav::-webkit-scrollbar-thumb {
     background: rgba(255, 255, 255, 0.2);
+  }
+
+  .settings-nav {
+    background: rgba(15, 23, 42, 0.35);
+    border-right-color: rgba(51, 65, 85, 0.6);
+  }
+
+  .settings-nav-item {
+    color: var(--text-secondary, #94a3b8);
+  }
+
+  .settings-nav-item:hover {
+    background: rgba(15, 23, 42, 0.8);
+    color: var(--text-primary, #f1f5f9);
+  }
+
+  .settings-nav-item.active {
+    background: rgba(99, 102, 241, 0.15);
+    border-color: rgba(99, 102, 241, 0.4);
+    color: #a5b4fc;
   }
 
   .engine-card {
@@ -2744,7 +2913,30 @@ const handleRecentError = () => {
 }
 
 @media (max-width: 768px) {
-  .settings-body {
+  .settings-shell {
+    grid-template-columns: minmax(0, 1fr);
+    grid-template-rows: auto minmax(0, 1fr);
+  }
+
+  .settings-nav {
+    flex-direction: row;
+    flex-shrink: 0;
+    gap: 6px;
+    padding: 8px 12px;
+    border-right: none;
+    border-bottom: 1px solid rgba(226, 232, 240, 0.6);
+    overflow-x: auto;
+    overflow-y: hidden;
+  }
+
+  .settings-nav-item {
+    flex: 1;
+    min-width: 0;
+    text-align: center;
+    padding: 8px 10px;
+  }
+
+  .settings-panel {
     padding: 16px 12px;
   }
 }
@@ -3022,67 +3214,6 @@ const handleRecentError = () => {
   border-left: 2px solid #6366f1;
 }
 
-/* ===== 高级折叠面板 ===== */
-.advanced-section {
-  border: 1px solid rgba(226, 232, 240, 0.6);
-  border-radius: 10px;
-  background: rgba(248, 250, 252, 0.8);
-  overflow: hidden;
-  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.03);
-}
-
-.advanced-header {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  padding: 12px 14px;
-  cursor: pointer;
-  user-select: none;
-  transition: background 0.2s;
-}
-
-.advanced-header:hover {
-  background: rgba(241, 245, 249, 0.6);
-}
-
-.advanced-title {
-  font-size: 14px;
-  font-weight: 600;
-  color: var(--text-primary, #1e293b);
-  text-transform: uppercase;
-  letter-spacing: 0.5px;
-}
-
-.advanced-arrow {
-  font-size: 12px;
-  color: var(--text-secondary, #94a3b8);
-  transition: transform 0.3s ease;
-  line-height: 1;
-}
-
-.advanced-arrow.open {
-  transform: rotate(90deg);
-}
-
-.advanced-body {
-  max-height: 0;
-  overflow: hidden;
-  transition: max-height 0.35s ease;
-}
-
-.advanced-body.open {
-  max-height: 2000px;
-}
-
-.advanced-body-inner {
-  padding: 0 14px 14px;
-  border-top: 1px solid rgba(226, 232, 240, 0.6);
-}
-
-.advanced-body-inner .section-title {
-  margin-top: 12px;
-}
-
 /* ===== 最近错误按钮 ===== */
 .log-recent-error-btn {
   color: #ef4444;
@@ -3163,27 +3294,6 @@ const handleRecentError = () => {
     background: rgba(255, 255, 255, 0.2);
   }
 
-  .advanced-section {
-    border-color: rgba(51, 65, 85, 0.6);
-    background: rgba(15, 23, 42, 0.6);
-  }
-
-  .advanced-header:hover {
-    background: rgba(15, 23, 42, 0.8);
-  }
-
-  .advanced-title {
-    color: var(--text-primary, #f1f5f9);
-  }
-
-  .advanced-arrow {
-    color: var(--text-secondary, #64748b);
-  }
-
-  .advanced-body-inner {
-    border-top-color: rgba(51, 65, 85, 0.6);
-  }
-
   .stability-viewer {
     background: rgba(15, 23, 42, 0.6);
     border-color: rgba(51, 65, 85, 0.6);
@@ -3225,12 +3335,16 @@ const handleRecentError = () => {
     flex-direction: column;
   }
 
-  .advanced-header {
-    padding: 10px 12px;
+  .stability-viewer-header,
+  .log-viewer-header {
+    flex-wrap: wrap;
+    gap: 8px;
+    align-items: flex-start;
   }
 
-  .advanced-body-inner {
-    padding: 0 12px 12px;
+  .stability-viewer-actions,
+  .log-viewer-actions {
+    flex-wrap: wrap;
   }
 
   .stability-row {
@@ -3250,6 +3364,31 @@ const handleRecentError = () => {
 
   .stability-bar {
     min-width: 60px;
+  }
+}
+
+@media (max-height: 599px) {
+  .settings-topbar {
+    padding: 8px 12px;
+  }
+
+  .settings-nav {
+    padding: 6px 8px;
+  }
+
+  .settings-panel {
+    padding: 12px;
+  }
+
+  .log-list {
+    max-height: 220px;
+  }
+}
+
+@media (prefers-color-scheme: dark) and (max-width: 768px) {
+  .settings-nav {
+    border-right-color: transparent;
+    border-bottom-color: rgba(51, 65, 85, 0.6);
   }
 }
 </style>

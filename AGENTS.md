@@ -26,7 +26,7 @@ pnpm build  # 构建到 dist/；会把 google-translate-api-x 解引用复制进
 
 ## 陷阱
 
-- `src/Settings/index.vue`、`src/Translate/components/SettingsPanel.vue`、`KeyboardShortcuts.vue` 是**无引用的遗留文件**，勿当作活代码改。当前设置页是 `Translate/components/SettingsPage.vue`。
+- `src/Settings/index.vue`、`src/Translate/components/SettingsPanel.vue`、`KeyboardShortcuts.vue` 是**无引用的遗留文件**，勿当作活代码改。当前设置页是 `Translate/components/SettingsPage.vue`，分「常规 / 引擎 / 高级」三类（宽屏侧栏、窄屏顶部标签），分类选择不持久化；输出开关在常规且仍由主引擎（`failoverOrder[0]`）决定，不是引擎页当前选中项。
 - 根目录 `google-translate-endpoints.mjs` 是调研参考实现，不参与构建；运行时 Google 翻译逻辑在 preload。
 - `pnpm-workspace.yaml` 仅有 `allowBuilds: esbuild`（允许 esbuild 的安装期构建脚本），勿删。
 - 组件里 `<script lang="ts" setup>` 写的实际是纯 JS（仅靠 jsconfig + `utools-api-types` 提供类型提示）。
