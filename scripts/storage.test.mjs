@@ -18,6 +18,9 @@ const {
   normalizeEngineResponseTimeoutSeconds,
   snapshotEngineTimeoutMs,
   ENGINE_RESPONSE_TIMEOUT_DEFAULT,
+  parseGoogleProxyUrl,
+  normalizeGoogleProxySettings,
+  snapshotGoogleProxy,
 } = await import('../src/Translate/utils/storage.js')
 
 const STORAGE_KEY = 'dev-translation-settings'
@@ -127,6 +130,64 @@ describe('loadSettings 超时字段', () => {
     assert.equal(s.engineResponseTimeoutSeconds, 5)
     assert.deepEqual(s.failoverOrder, DEFAULT_SETTINGS.failoverOrder)
     assert.equal(s.deeplApiKey, '')
+  })
+})
+
+describe('Google 代理设置', () => {
+  beforeEach(() => {
+    for (const k of Object.keys(store)) delete store[k]
+  })
+
+  it('新安装默认关闭且地址为空', () => {
+    const s = loadSettings()
+    assert.equal(s.googleProxyEnabled, false)
+    assert.equal(s.googleProxyUrl, '')
+    assert.equal(DEFAULT_SETTINGS.googleProxyEnabled, false)
+  })
+
+  it('拒绝 SOCKS5、凭据、空地址启用和畸形 URL', () => {
+    assert.equal(parseGoogleProxyUrl('').reason, 'empty')
+    assert.equal(parseGoogleProxyUrl('socks5://127.0.0.1:1080').reason, 'protocol')
+    assert.equal(parseGoogleProxyUrl('http://user:pass@127.0.0.1:8080').reason, 'credentials')
+    assert.equal(parseGoogleProxyUrl('not a url').reason, 'malformed')
+    assert.equal(parseGoogleProxyUrl('http://127.0.0.1:7890').ok, true)
+    assert.equal(parseGoogleProxyUrl('https://proxy.example:8443').url, 'https://proxy.example:8443')
+    const invalidEnabled = normalizeGoogleProxySettings({
+      googleProxyEnabled: true,
+      googleProxyUrl: 'socks5://127.0.0.1:1080',
+    })
+    assert.equal(invalidEnabled.googleProxyEnabled, false)
+    assert.equal(snapshotGoogleProxy({
+      googleProxyEnabled: true,
+      googleProxyUrl: 'http://user:x@127.0.0.1:9',
+    }).proxyEnabled, false)
+  })
+
+  it('合法代理可保存并在重新加载后保持；非法启用不会落成有效开启', () => {
+    const current = loadSettings()
+    current.googleProxyEnabled = true
+    current.googleProxyUrl = 'http://127.0.0.1:7890'
+    assert.equal(saveSettings(current), true)
+    const loaded = loadSettings()
+    assert.equal(loaded.googleProxyEnabled, true)
+    assert.equal(loaded.googleProxyUrl, 'http://127.0.0.1:7890')
+
+    loaded.googleProxyEnabled = true
+    loaded.googleProxyUrl = 'socks5://127.0.0.1:1080'
+    assert.equal(saveSettings(loaded), true)
+    const again = loadSettings()
+    assert.equal(again.googleProxyEnabled, false)
+  })
+
+  it('旧配置缺字段时补默认关闭，不丢其它设置', () => {
+    store[STORAGE_KEY] = JSON.stringify({
+      deeplApiKey: 'keep-key',
+      failoverOrder: ['google', 'ai', 'thirdparty-ai', 'deepl', 'deeplx'],
+    })
+    const s = loadSettings()
+    assert.equal(s.googleProxyEnabled, false)
+    assert.equal(s.googleProxyUrl, '')
+    assert.equal(s.deeplApiKey, 'keep-key')
   })
 })
 

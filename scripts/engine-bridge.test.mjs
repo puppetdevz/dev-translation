@@ -115,6 +115,26 @@ describe('classifyError', () => {
     assert.equal(r.safeMessage.includes('https://'), false)
     assert.equal(r.safeMessage.includes('token'), false)
   })
+
+  it('识别代理连接失败并保留来源级安全诊断', () => {
+    const err = new Error('代理连接失败')
+    err.category = 'proxy_connect'
+    err.googleAttempts = [
+      { source: 'library', route: 'proxy', category: 'timeout', durationMs: 100 },
+      { source: 'gtx', route: 'proxy', category: 'proxy_connect', durationMs: 80 },
+      { source: 'gtx', route: 'direct', category: 'timeout', durationMs: 120, url: 'https://translate.googleapis.com/?q=机密' },
+    ]
+    const r = classifyError(err)
+    assert.equal(r.category, ERROR_CATEGORY.PROXY_CONNECT)
+    assert.equal(r.safeMessage.includes('代理'), true)
+    assert.equal(r.safeMessage.includes('自填代理'), true)
+    assert.equal(r.source, 'gtx')
+    assert.equal(r.route, 'direct')
+    assert.equal(r.googleAttempts.length, 3)
+    const blob = JSON.stringify(r)
+    assert.equal(blob.includes('googleapis'), false)
+    assert.equal(blob.includes('机密'), false)
+  })
 })
 
 describe('runEngineFailover', () => {

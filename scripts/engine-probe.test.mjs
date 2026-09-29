@@ -152,6 +152,11 @@ describe('snapshotProbeConfig / isProbeConfigUnchanged', () => {
       ...CONFIGURED,
       failoverOrder: ['google', 'ai', 'thirdparty-ai', 'deepl', 'deeplx'],
     }), false)
+    assert.equal(isProbeConfigUnchanged(snap, {
+      ...CONFIGURED,
+      googleProxyEnabled: true,
+      googleProxyUrl: 'http://127.0.0.1:7890',
+    }), false)
   })
 })
 
@@ -530,8 +535,8 @@ describe('callEngineProbe', () => {
         },
       },
       services: {
-        googleTranslate: async (t, from, to, ms) => {
-          captured.google = { t, from, to, ms }
+        googleTranslate: async (t, from, to, ms, opts) => {
+          captured.google = { t, from, to, ms, opts }
           return '你好'
         },
         deeplTranslate: async (t, from, to, key, ms) => {
@@ -556,6 +561,7 @@ describe('callEngineProbe', () => {
     assert.equal(captured.google.from, 'en')
     assert.equal(captured.google.to, 'zh-CN')
     assert.equal(captured.google.ms, timeoutMs)
+    assert.deepEqual(captured.google.opts, { proxyEnabled: false, proxyUrl: '' })
     assert.equal(captured.deepl.ms, timeoutMs)
     assert.equal(captured.deepl.key, 'k')
     assert.equal(captured.deeplx.ms, timeoutMs)
@@ -566,6 +572,33 @@ describe('callEngineProbe', () => {
     assert.equal(captured.thirdparty.body.messages[0].content.includes(text), true)
     assert.equal(captured.thirdparty.key, 'sk-secret')
     assert.equal(captured.ai.messages[0].content.includes(text), true)
+  })
+
+  it('Google 探测传入快照中的代理配置', async () => {
+    let captured = null
+    const env = {
+      services: {
+        googleTranslate: async (_t, _from, _to, ms, opts) => {
+          captured = { ms, opts }
+          return '你好'
+        },
+      },
+    }
+    await callEngineProbe('google', {
+      text: 'Hello World proxy',
+      settings: {
+        ...CONFIGURED,
+        googleProxyEnabled: true,
+        googleProxyUrl: 'http://127.0.0.1:7890',
+      },
+      env,
+      timeoutMs: 1500,
+    })
+    assert.equal(captured.ms, 1500)
+    assert.deepEqual(captured.opts, {
+      proxyEnabled: true,
+      proxyUrl: 'http://127.0.0.1:7890',
+    })
   })
 })
 

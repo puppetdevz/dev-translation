@@ -85,22 +85,19 @@ describe('Google 三源预算与 inflight', () => {
     }
   })
 
-  it('第一源挂起时总等待不超过自身预算，不启动后续源', async () => {
+  it('第一源挂起时仍尝试后续源，总等待不超过自身预算', async () => {
     const started = []
     testApi.setTranslateSourcesForTest([
       { name: 'a', fn: async () => { started.push('a'); return hang() } },
-      { name: 'b', fn: async () => { started.push('b'); return 'b' } },
-      { name: 'c', fn: async () => { started.push('c'); return 'c' } },
+      { name: 'b', fn: async () => { started.push('b'); return 'ok-b' } },
+      { name: 'c', fn: async () => { started.push('c'); return 'ok-c' } },
     ])
     const t0 = Date.now()
-    await assert.rejects(
-      () => services.googleTranslate('hello', 'en', 'zh-CN', 70),
-      /超时/
-    )
+    const result = await services.googleTranslate('hello', 'en', 'zh-CN', 120)
     const elapsed = Date.now() - t0
-    assert.deepEqual(started, ['a'])
+    assert.equal(result, 'ok-b')
+    assert.deepEqual(started, ['a', 'b'])
     assert.ok(elapsed < 280, `不得把三源叠加到 3 倍，实际 ${elapsed}ms`)
-    assert.ok(elapsed >= 50)
   })
 
   it('第一源提前失败且时间有余则尝试第二源', async () => {
@@ -118,19 +115,17 @@ describe('Google 三源预算与 inflight', () => {
   it('无剩余时间不再启动新源', async () => {
     const started = []
     testApi.setTranslateSourcesForTest([
-      { name: 'a', fn: async (_t, _f, _to, timeoutMs) => {
-        started.push('a')
-        await delay(Math.max(1, timeoutMs + 20))
-        throw new Error('slow-a')
-      } },
+      { name: 'a', fn: async () => { started.push('a'); return 'a' } },
       { name: 'b', fn: async () => { started.push('b'); return 'b' } },
     ])
     await assert.rejects(
-      () => services.googleTranslate('hello', 'en', 'zh-CN', 40),
+      () => testApi.translateWithSources('hello', 'en', 'zh-CN', {
+        shareBudget: true,
+        getRemaining: () => 0,
+      }),
       /超时/
     )
-    assert.equal(started.includes('a'), true)
-    assert.equal(started.includes('b'), false)
+    assert.deepEqual(started, [])
   })
 
   it('相同文本并发等待时，一个超时不破坏另一有效等待者及缓存', async () => {
@@ -179,6 +174,141 @@ describe('Google 三源预算与 inflight', () => {
     ])
     assert.equal(await services.googleTranslate('hello', 'en', 'zh-CN'), 'legacy-b')
     assert.deepEqual(started, ['a', 'b'])
+  })
+
+  it('三源分别失败时错误带来源级安全诊断且不含 URL/代理地址', async () => {
+    const e429 = new Error('HTTP 429')
+    e429.statusCode = 429
+    testApi.setTranslateSourcesForTest([
+      { name: 'library', fn: async () => { throw new Error('请求超时') } },
+      { name: 'gtx', fn: async () => { throw e429 } },
+      { name: 'clients5', fn: async () => { throw new Error('响应解析失败') } },
+    ])
+    try {
+      await services.googleTranslate('diag-text', 'en', 'zh-CN', 300)
+      assert.fail('should throw')
+    } catch (err) {
+      assert.ok(Array.isArray(err.googleAttempts))
+      assert.equal(err.googleAttempts.length, 3)
+      assert.equal(err.googleAttempts[0].source, 'library')
+      assert.equal(err.googleAttempts[0].category, 'timeout')
+      assert.equal(err.googleAttempts[0].route, 'direct')
+      assert.equal(err.googleAttempts[1].source, 'gtx')
+      assert.equal(err.googleAttempts[1].statusCode, 429)
+      assert.equal(err.googleAttempts[2].source, 'clients5')
+      assert.equal(err.googleAttempts[2].category, 'parse_error')
+      const blob = JSON.stringify(err.googleAttempts) + String(err.message || '')
+      assert.equal(/https?:\/\//.test(blob), false)
+      assert.equal(blob.includes('127.0.0.1'), false)
+      assert.equal(blob.includes('diag-text'), false)
+    }
+  })
+
+  it('429 不立即对同源连环重试，改为切下一源', async () => {
+    const calls = []
+    const e429 = new Error('HTTP 429')
+    e429.statusCode = 429
+    testApi.setTranslateSourcesForTest([
+      { name: 'library', fn: async () => { calls.push('library'); throw e429 } },
+      { name: 'gtx', fn: async () => { calls.push('gtx'); return 'ok-gtx' } },
+    ])
+    assert.equal(await services.googleTranslate('rate-limit', 'en', 'zh-CN', 200), 'ok-gtx')
+    assert.deepEqual(calls, ['library', 'gtx'])
+  })
+
+  it('空译文不作为成功，继续后续源且不把空串写入缓存', async () => {
+    let n = 0
+    testApi.setTranslateSourcesForTest([
+      { name: 'library', fn: async () => { n += 1; return '' } },
+      { name: 'gtx', fn: async () => { n += 1; return 'ok-nonempty' } },
+    ])
+    assert.equal(await services.googleTranslate('empty-then-ok', 'en', 'zh-CN', 200), 'ok-nonempty')
+    assert.equal(n, 2)
+    assert.equal(await services.googleTranslate('empty-then-ok', 'en', 'zh-CN', 40), 'ok-nonempty')
+    assert.equal(n, 2)
+  })
+
+  it('代理阶段挂起时仍尝试直连，总等待不超过预算', async () => {
+    const started = []
+    testApi.setTranslateSourcesForTest([
+      {
+        name: 'library',
+        fn: async (_t, _f, _to, _ms, _s, tr) => {
+          started.push(tr && tr.route)
+          if (tr && tr.route === 'proxy') return hang()
+          return 'direct-ok'
+        },
+      },
+      {
+        name: 'gtx',
+        fn: async (_t, _f, _to, _ms, _s, tr) => {
+          started.push('gtx-' + (tr && tr.route))
+          return hang()
+        },
+      },
+    ])
+    const t0 = Date.now()
+    const result = await services.googleTranslate('hello', 'en', 'zh-CN', 220, {
+      proxyEnabled: true,
+      proxyUrl: 'http://127.0.0.1:9',
+    })
+    const elapsed = Date.now() - t0
+    assert.equal(result, 'direct-ok')
+    assert.ok(started.includes('proxy'))
+    assert.ok(started.includes('direct'))
+    assert.ok(elapsed < 400, `代理+直连不得叠加成双倍预算，实际 ${elapsed}ms`)
+  })
+
+  it('代理配置不同的同文本不共享 inflight', async () => {
+    const routes = []
+    testApi.setTranslateSourcesForTest([
+      {
+        name: 'library',
+        fn: async (_t, _f, _to, _ms, _s, tr) => {
+          routes.push(tr && tr.route)
+          await delay(40)
+          return (tr && tr.route) + '-ok'
+        },
+      },
+    ])
+    const p1 = services.googleTranslate('same-route', 'en', 'zh-CN', 300)
+    const p2 = services.googleTranslate('same-route', 'en', 'zh-CN', 300, {
+      proxyEnabled: true,
+      proxyUrl: 'http://127.0.0.1:9',
+    })
+    const [direct, proxied] = await Promise.all([p1, p2])
+    assert.equal(direct, 'direct-ok')
+    assert.equal(proxied, 'proxy-ok')
+    assert.ok(routes.includes('direct'))
+    assert.ok(routes.includes('proxy'))
+  })
+
+  it('非法或带凭据代理不启用，走直连', async () => {
+    const routes = []
+    testApi.setTranslateSourcesForTest([
+      {
+        name: 'library',
+        fn: async (_t, _f, _to, _ms, _s, tr) => {
+          routes.push(tr && tr.route)
+          return 'ok'
+        },
+      },
+    ])
+    assert.equal(
+      await services.googleTranslate('no-socks', 'en', 'zh-CN', 120, {
+        proxyEnabled: true,
+        proxyUrl: 'socks5://127.0.0.1:1080',
+      }),
+      'ok'
+    )
+    assert.equal(
+      await services.googleTranslate('no-cred', 'en', 'zh-CN', 120, {
+        proxyEnabled: true,
+        proxyUrl: 'http://user:pass@127.0.0.1:8080',
+      }),
+      'ok'
+    )
+    assert.deepEqual(routes, ['direct', 'direct'])
   })
 })
 
@@ -259,5 +389,89 @@ describe('翻译 HTTP 超时取消与非翻译接口时限', () => {
     assert.equal(services.requestThirdpartyAI.length, 4)
     assert.equal(services.fetchThirdpartyModels.length, 2)
     assert.equal(services.lookupWord.length, 1)
+  })
+})
+
+describe('Google CONNECT 代理传输', () => {
+  let services
+  let testApi
+  let proxy
+  let connects
+  let mode
+
+  beforeEach(async () => {
+    const loaded = loadServicesWithGoogleRequire(true)
+    services = loaded.services
+    testApi = loaded.testApi
+    connects = []
+    mode = 'fail'
+    proxy = http.createServer((_req, res) => {
+      res.writeHead(400)
+      res.end()
+    })
+    proxy.on('connect', (req, clientSocket) => {
+      connects.push(req.url)
+      if (mode === 'hang') return
+      clientSocket.write('HTTP/1.1 502 Bad Gateway\r\n\r\n')
+      clientSocket.end()
+    })
+    await new Promise((resolve) => proxy.listen(0, '127.0.0.1', resolve))
+  })
+
+  afterEach(async () => {
+    if (testApi) {
+      testApi.restoreAllowedGoogleHosts()
+      testApi.restoreTranslateSources()
+      testApi.clearTranslateCache()
+    }
+    if (proxy) {
+      await new Promise((resolve) => proxy.close(() => resolve()))
+    }
+  })
+
+  function proxyUrl() {
+    return `http://127.0.0.1:${proxy.address().port}`
+  }
+
+  it('启用代理时对允许的 Google 主机发出 CONNECT，失败后销毁连接', async () => {
+    await assert.rejects(
+      () => testApi.googleHttpRequest({
+        url: 'https://translate.googleapis.com/translate_a/single?q=1',
+        timeoutMs: 200,
+        proxyUrl: proxyUrl(),
+      }),
+      /代理|超时|失败/
+    )
+    assert.ok(connects.some((item) => String(item).startsWith('translate.googleapis.com:443')))
+    const blob = JSON.stringify(connects)
+    assert.equal(blob.includes('?q='), false)
+  })
+
+  it('拒绝向非 Google 主机转发，不发出 CONNECT', async () => {
+    await assert.rejects(
+      () => testApi.googleHttpRequest({
+        url: 'https://example.com/',
+        timeoutMs: 120,
+        proxyUrl: proxyUrl(),
+      }),
+      /不允许/
+    )
+    assert.deepEqual(connects, [])
+  })
+
+  it('代理 CONNECT 挂起不超过该段时限', async () => {
+    mode = 'hang'
+    const t0 = Date.now()
+    await assert.rejects(
+      () => testApi.googleHttpRequest({
+        url: 'https://clients5.google.com/translate_a/t',
+        timeoutMs: 70,
+        proxyUrl: proxyUrl(),
+      }),
+      /超时/
+    )
+    const elapsed = Date.now() - t0
+    assert.ok(elapsed < 250, `CONNECT 挂起应被时限切断，实际 ${elapsed}ms`)
+    assert.ok(connects.length >= 1)
   })
 })

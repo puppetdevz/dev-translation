@@ -4,6 +4,7 @@
  */
 
 import { hasReadyThirdpartyAiGroup } from './thirdpartyAiGroups.js'
+import { sanitizeGoogleAttempts } from './safeLog.js'
 
 export const ENGINE_DISPLAY_NAMES = {
   ai: 'uTools AI',
@@ -40,6 +41,8 @@ export const ERROR_CATEGORY = {
   TIMEOUT: 'timeout',
   PARSE_ERROR: 'parse_error',
   EMPTY_RESULT: 'empty_result',
+  NETWORK_ERROR: 'network_error',
+  PROXY_CONNECT: 'proxy_connect',
   UNKNOWN: 'unknown',
 }
 
@@ -71,6 +74,8 @@ export const SAFE_MESSAGES = {
   TIMEOUT: '引擎请求超时',
   PARSE_ERROR: '翻译结果解析失败',
   EMPTY_RESULT: '引擎返回空结果',
+  NETWORK_ERROR: '网络请求失败',
+  PROXY_CONNECT: '代理连接失败',
   UNKNOWN: '引擎调用失败',
   RELOAD_HINT: '翻译服务未加载。请重载插件，或确认安装的是最新版本后重新安装。',
 }
@@ -177,59 +182,95 @@ function extractStatusCode(err, raw) {
   return null
 }
 
+function withGoogleDiagnostics(result, err) {
+  const attempts = sanitizeGoogleAttempts(err && err.googleAttempts)
+  if (attempts.length) result.googleAttempts = attempts
+  const last = attempts.length ? attempts[attempts.length - 1] : null
+  if (last && last.source) result.source = last.source
+  else if (err && (err.source === 'library' || err.source === 'gtx' || err.source === 'clients5')) {
+    result.source = err.source
+  }
+  if (last && last.route) result.route = last.route
+  else if (err && (err.route === 'proxy' || err.route === 'direct')) {
+    result.route = err.route
+  }
+  if (last && last.durationMs != null) result.durationMs = last.durationMs
+  else if (Number.isFinite(Number(err && err.durationMs))) {
+    result.durationMs = Math.min(60000, Math.max(0, Math.round(Number(err.durationMs))))
+  }
+  if (attempts.some((item) => item.route === 'proxy')) {
+    const base = result.safeMessage || SAFE_MESSAGES.UNKNOWN
+    if (!base.includes('自填代理')) {
+      result.safeMessage = base.replace(/。?$/, '') + '。可检查自填代理或切换其他引擎'
+    }
+  }
+  return result
+}
+
 export function classifyError(err) {
   const raw = err == null
     ? ''
     : (err && err.message != null ? String(err.message) : String(err))
   const statusCode = extractStatusCode(err, raw)
+  const tagged = err && err.category
 
+  let result
   if (statusCode === 524 || /\b524\b/.test(raw)) {
-    return {
+    result = {
       category: ERROR_CATEGORY.STATUS_524,
       statusCode: 524,
       safeMessage: SAFE_MESSAGES.STATUS_524,
     }
-  }
-  if (statusCode) {
-    return {
+  } else if (tagged === ERROR_CATEGORY.PROXY_CONNECT || /代理连接失败/.test(raw)) {
+    result = {
+      category: ERROR_CATEGORY.PROXY_CONNECT,
+      statusCode,
+      safeMessage: SAFE_MESSAGES.PROXY_CONNECT,
+    }
+  } else if (statusCode) {
+    result = {
       category: ERROR_CATEGORY.HTTP_ERROR,
       statusCode,
       safeMessage: `引擎返回 HTTP ${statusCode}`,
     }
-  }
-  if (/超时|timeout/i.test(raw)) {
-    return {
+  } else if (/超时|timeout/i.test(raw)) {
+    result = {
       category: ERROR_CATEGORY.TIMEOUT,
       statusCode: null,
       safeMessage: SAFE_MESSAGES.TIMEOUT,
     }
-  }
-  if (/无法解析|解析失败/.test(raw)) {
-    return {
+  } else if (/无法解析|解析失败/.test(raw)) {
+    result = {
       category: ERROR_CATEGORY.PARSE_ERROR,
       statusCode: null,
       safeMessage: SAFE_MESSAGES.PARSE_ERROR,
     }
-  }
-  if (/空结果|空译文/.test(raw)) {
-    return {
+  } else if (/空结果|空译文/.test(raw)) {
+    result = {
       category: ERROR_CATEGORY.EMPTY_RESULT,
       statusCode: null,
       safeMessage: SAFE_MESSAGES.EMPTY_RESULT,
     }
-  }
-  if (/翻译服务未加载|桥接/.test(raw)) {
-    return {
+  } else if (tagged === ERROR_CATEGORY.NETWORK_ERROR || /网络请求失败/.test(raw)) {
+    result = {
+      category: ERROR_CATEGORY.NETWORK_ERROR,
+      statusCode: null,
+      safeMessage: SAFE_MESSAGES.NETWORK_ERROR,
+    }
+  } else if (/翻译服务未加载|桥接/.test(raw)) {
+    result = {
       category: ERROR_CATEGORY.BRIDGE_MISSING,
       statusCode: null,
       safeMessage: SAFE_MESSAGES.BRIDGE_MISSING,
     }
+  } else {
+    result = {
+      category: ERROR_CATEGORY.UNKNOWN,
+      statusCode: null,
+      safeMessage: SAFE_MESSAGES.UNKNOWN,
+    }
   }
-  return {
-    category: ERROR_CATEGORY.UNKNOWN,
-    statusCode: null,
-    safeMessage: SAFE_MESSAGES.UNKNOWN,
-  }
+  return withGoogleDiagnostics(result, err)
 }
 
 export function skipUserMessage(inspection) {

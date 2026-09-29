@@ -44,6 +44,78 @@ export function snapshotThirdpartyAiTimeoutMs(settings) {
   return normalizeEngineResponseTimeoutSeconds(settings && settings.thirdpartyAiFailoverTimeoutSeconds) * 1000
 }
 
+export const GOOGLE_PROXY_ERROR = {
+  empty: '启用代理时请填写地址',
+  protocol: '仅支持 http:// 或 https:// 的 CONNECT 代理，不支持 SOCKS5',
+  credentials: '不支持带用户名密码的代理',
+  malformed: '代理地址格式无效',
+}
+
+/**
+ * 仅接受无用户名密码的 http:// 或 https:// CONNECT 代理。
+ * 不把解析失败的原因写成含主机/凭据的句子。
+ */
+export function parseGoogleProxyUrl(raw) {
+  const trimmed = raw == null ? '' : String(raw).trim()
+  if (!trimmed) return { ok: false, reason: 'empty', url: '' }
+  let parsed
+  try {
+    parsed = new URL(trimmed)
+  } catch {
+    return { ok: false, reason: 'malformed', url: trimmed }
+  }
+  const protocol = String(parsed.protocol || '').toLowerCase()
+  if (protocol === 'socks:' || protocol === 'socks4:' || protocol === 'socks5:') {
+    return { ok: false, reason: 'protocol', url: trimmed }
+  }
+  if (protocol !== 'http:' && protocol !== 'https:') {
+    return { ok: false, reason: 'protocol', url: trimmed }
+  }
+  if (parsed.username || parsed.password) {
+    return { ok: false, reason: 'credentials', url: trimmed }
+  }
+  if (!parsed.hostname) {
+    return { ok: false, reason: 'malformed', url: trimmed }
+  }
+  const port = parsed.port
+  return {
+    ok: true,
+    reason: '',
+    url: `${protocol}//${parsed.hostname}${port ? ':' + port : ''}`,
+  }
+}
+
+export function googleProxyErrorMessage(reason) {
+  return GOOGLE_PROXY_ERROR[reason] || GOOGLE_PROXY_ERROR.malformed
+}
+
+export function normalizeGoogleProxySettings(settings) {
+  const s = settings || {}
+  const parsed = parseGoogleProxyUrl(s.googleProxyUrl)
+  const urlToKeep = parsed.ok
+    ? parsed.url
+    : (s.googleProxyUrl == null ? '' : String(s.googleProxyUrl).trim())
+  if (s.googleProxyEnabled !== true) {
+    return { googleProxyEnabled: false, googleProxyUrl: urlToKeep }
+  }
+  if (!parsed.ok) {
+    return {
+      googleProxyEnabled: false,
+      googleProxyUrl: urlToKeep,
+      error: parsed.reason,
+    }
+  }
+  return { googleProxyEnabled: true, googleProxyUrl: parsed.url }
+}
+
+export function snapshotGoogleProxy(settings) {
+  const normalized = normalizeGoogleProxySettings(settings)
+  return {
+    proxyEnabled: !!normalized.googleProxyEnabled,
+    proxyUrl: normalized.googleProxyEnabled ? normalized.googleProxyUrl : '',
+  }
+}
+
 function cloneSettings(settings) {
   const next = { ...settings }
   if (Array.isArray(settings.failoverOrder)) {
@@ -73,6 +145,8 @@ export const DEFAULT_SETTINGS = {
   thirdpartyAiSystemPrompt: '',     // 所有自定义 AI 组共用的系统提示词（作为 system role，user role 仍放默认指令）
   logLevel: 'error',                // 日志记录等级: 'debug' | 'info' | 'error'（默认仅记录错误，便于排查翻译失败）
   logRetentionDays: 7,              // 日志保留天数: 1/3/7/0(永久)，到期自动清理；始终受最大条数封顶
+  googleProxyEnabled: false,        // Google 专用 HTTP(S) CONNECT 代理，默认关闭
+  googleProxyUrl: '',               // 用户自填、无认证的 http:// 或 https:// 代理地址
 }
 
 // 已知引擎白名单：loadSettings 会用它过滤 failoverOrder，剔除未知/废弃的引擎标识，防止渲染时 engineMeta[engine] 为 undefined 致白屏
@@ -144,6 +218,11 @@ export const loadSettings = () => {
       merged.thirdpartyAiFailoverTimeoutSeconds = normalizeEngineResponseTimeoutSeconds(
         merged.thirdpartyAiFailoverTimeoutSeconds
       )
+      {
+        const proxy = normalizeGoogleProxySettings(merged)
+        merged.googleProxyEnabled = proxy.googleProxyEnabled
+        merged.googleProxyUrl = proxy.googleProxyUrl
+      }
       if (Array.isArray(parsed.thirdpartyAiGroups)) {
         merged.thirdpartyAiGroups = normalizeThirdpartyAiGroups(parsed.thirdpartyAiGroups)
       } else {
@@ -177,6 +256,11 @@ export const saveSettings = (settings) => {
     payload.thirdpartyAiFailoverTimeoutSeconds = normalizeEngineResponseTimeoutSeconds(
       payload.thirdpartyAiFailoverTimeoutSeconds
     )
+    {
+      const proxy = normalizeGoogleProxySettings(payload)
+      payload.googleProxyEnabled = proxy.googleProxyEnabled
+      payload.googleProxyUrl = proxy.googleProxyUrl
+    }
     stripLegacyThirdpartyAiFields(payload)
     // uTools 通常不返回状态；部分存储实现用 false 报告写入失败。
     return window.utools.dbStorage.setItem(STORAGE_KEY, JSON.stringify(payload)) !== false

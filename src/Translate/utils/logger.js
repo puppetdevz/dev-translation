@@ -100,6 +100,10 @@ export function addLog(level, engine, message, extra) {
     skipCategory: meta.skipCategory,
     groupId: meta.groupId,
     groupIndex: meta.groupIndex,
+    source: meta.source,
+    route: meta.route,
+    durationMs: meta.durationMs,
+    googleAttempts: meta.googleAttempts,
   })
   if (!entry) return
   const logs = readLogs()

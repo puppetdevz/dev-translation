@@ -13,6 +13,9 @@ import {
   ENGINE_RESPONSE_TIMEOUT_MAX,
   snapshotEngineTimeoutMs,
   snapshotThirdpartyAiTimeoutMs,
+  parseGoogleProxyUrl,
+  googleProxyErrorMessage,
+  snapshotGoogleProxy,
 } from '../utils/storage.js'
 import {
   snapshotThirdpartyAiGroups,
@@ -58,6 +61,31 @@ const persistSetting = (key, value) => {
   const ok = updateSetting(key, value)
   saveNotice.value = ok ? '' : '保存失败'
   return ok
+}
+
+const googleProxyError = ref('')
+const commitGoogleProxyEnabled = (nextEnabled) => {
+  if (nextEnabled) {
+    const parsed = parseGoogleProxyUrl(settings.googleProxyUrl)
+    if (!parsed.ok) {
+      googleProxyError.value = googleProxyErrorMessage(parsed.reason)
+      persistSetting('googleProxyEnabled', false)
+      return false
+    }
+  }
+  googleProxyError.value = ''
+  return persistSetting('googleProxyEnabled', !!nextEnabled)
+}
+const commitGoogleProxyUrl = (raw) => {
+  const parsed = parseGoogleProxyUrl(raw)
+  const draft = parsed.ok ? parsed.url : String(raw || '').trim()
+  if (settings.googleProxyEnabled && !parsed.ok) {
+    googleProxyError.value = googleProxyErrorMessage(parsed.reason)
+    persistSetting('googleProxyEnabled', false)
+    return persistSetting('googleProxyUrl', draft)
+  }
+  googleProxyError.value = (!draft || parsed.ok) ? '' : googleProxyErrorMessage(parsed.reason)
+  return persistSetting('googleProxyUrl', draft)
 }
 
 const commitEngineTimeout = (raw) => {
@@ -147,7 +175,13 @@ const runEngineTest = async (engine) => {
         throw err
       }
       case 'google':
-        result = await window.services.googleTranslate(TEST_TEXT, 'en', 'zh-CN')
+        result = await window.services.googleTranslate(
+          TEST_TEXT,
+          'en',
+          'zh-CN',
+          undefined,
+          snapshotGoogleProxy(settingsSnap),
+        )
         break
       case 'deepl':
         result = await window.services.deeplTranslate(TEST_TEXT, 'en', 'zh-CN', settings.deeplApiKey)
@@ -193,6 +227,8 @@ watch(
     settings.deeplxToken,
     JSON.stringify((settings.thirdpartyAiGroups || []).map(g => [g.id, g.name, g.url, g.apiKey, g.model])),
     settings.thirdpartyAiSystemPrompt,
+    settings.googleProxyEnabled,
+    settings.googleProxyUrl,
   ],
   () => {
     if (probeRunning.value) probeStale = true
@@ -1075,6 +1111,38 @@ const handleRecentError = () => {
                     <p class="deepl-config-hint">兼容 OpenAI 协议（Bearer Key 认证）。API 链接只需填到 <code class="hint-code">/v1</code>，程序自动补全 <code class="hint-code">/chat/completions</code>。组测试与「测试配置」会真实请求，可能消耗额度，且不发送上述系统提示词、不计入成功率。</p>
                   </div>
                 </template>
+                <template v-else-if="selectedEngine === 'google'">
+                  <div class="deepl-config" style="margin-top: 0;">
+                    <div class="google-proxy-row">
+                      <div class="output-info">
+                        <span class="output-name">使用 HTTP(S) 代理</span>
+                        <span class="output-desc">默认关闭，仅用于 Google 翻译</span>
+                      </div>
+                      <button
+                        type="button"
+                        class="toggle-switch"
+                        :class="{ active: settings.googleProxyEnabled }"
+                        :aria-pressed="settings.googleProxyEnabled ? 'true' : 'false'"
+                        aria-label="使用 HTTP(S) 代理"
+                        @click="commitGoogleProxyEnabled(!settings.googleProxyEnabled)"
+                      >
+                        <span class="toggle-slider"></span>
+                      </button>
+                    </div>
+                    <label class="deepl-config-label">代理地址</label>
+                    <input
+                      class="deepl-api-input"
+                      type="text"
+                      :value="settings.googleProxyUrl"
+                      @change="commitGoogleProxyUrl($event.target.value)"
+                      @blur="commitGoogleProxyUrl($event.target.value)"
+                      placeholder="http://127.0.0.1:7890"
+                      aria-label="Google 代理地址"
+                    />
+                    <p v-if="googleProxyError" class="google-proxy-error">{{ googleProxyError }}</p>
+                    <p class="deepl-config-hint">仅接受无用户名密码的 <code class="hint-code">http://</code> 或 <code class="hint-code">https://</code> CONNECT 代理，不支持 SOCKS5。启用后所有 Google 来源优先走该代理；代理故障时可能直连 Google。其他引擎和词典不使用此代理，也不会读取系统代理。</p>
+                  </div>
+                </template>
                 <template v-else>
                   <div class="engine-no-config">
                     <span v-if="engineMeta[selectedEngine].icon" class="engine-no-config-icon">{{ engineMeta[selectedEngine].icon }}</span>
@@ -1113,6 +1181,7 @@ const handleRecentError = () => {
                     </div>
                   </Transition>
                   <p v-if="selectedEngine === 'thirdparty-ai'" class="deepl-config-hint" style="margin-top: 8px;">「测试配置」按组顺序测试整条组链，成功时指出实际命中的组；各组「测试」只测该组。真实请求可能消耗额度，不计入成功率、不改变顺序。</p>
+                  <p v-else-if="selectedEngine === 'google'" class="deepl-config-hint" style="margin-top: 8px;">测试配置与正式翻译使用同一代理规则，不计入成功率。</p>
                 </div>
               </div>
             </Transition>
@@ -1177,7 +1246,7 @@ const handleRecentError = () => {
             </div>
 
             <h3 class="section-title">日志管理</h3>
-            <p class="section-hint">仅保留引擎、错误类别、状态码、阶段等最少元数据，不含原文、凭据或响应正文。仅保留最近记录。</p>
+            <p class="section-hint">仅保留引擎、错误类别、状态码、阶段、来源/路径等最少元数据，不含原文、凭据、代理地址或响应正文。仅保留最近记录。</p>
 
             <div class="log-config-row">
               <div class="log-config-item">
@@ -1216,7 +1285,7 @@ const handleRecentError = () => {
                   <span class="log-level-tag">{{ levelLabel(entry.level) }}</span>
                   <span class="log-engine">{{ engineName(entry.engine) }}</span>
                   <div class="log-message">{{ entry.message }}</div>
-                  <div v-if="entry.category || entry.statusCode || entry.phase || entry.skipReason || entry.groupId || entry.groupIndex != null" class="log-detail">
+                  <div v-if="entry.category || entry.statusCode || entry.phase || entry.skipReason || entry.groupId || entry.groupIndex != null || entry.source || entry.route || entry.durationMs != null || (entry.googleAttempts && entry.googleAttempts.length)" class="log-detail">
                     <span v-if="entry.category">类别 {{ entry.category }}</span>
                     <span v-if="entry.statusCode"> · 状态 {{ entry.statusCode }}</span>
                     <span v-if="entry.phase"> · 阶段 {{ entry.phase }}</span>
@@ -1224,6 +1293,10 @@ const handleRecentError = () => {
                     <span v-if="entry.requestId != null"> · 请求 {{ entry.requestId }}</span>
                     <span v-if="entry.groupId"> · 组 {{ entry.groupId }}</span>
                     <span v-if="entry.groupIndex != null"> · 组序号 {{ entry.groupIndex }}</span>
+                    <span v-if="entry.source"> · 来源 {{ entry.source }}</span>
+                    <span v-if="entry.route"> · 路径 {{ entry.route }}</span>
+                    <span v-if="entry.durationMs != null"> · 耗时 {{ entry.durationMs }}ms</span>
+                    <span v-if="entry.googleAttempts && entry.googleAttempts.length"> · 分源 {{ entry.googleAttempts.map(a => [a.source, a.route, a.category].filter(Boolean).join('/')).join(', ') }}</span>
                   </div>
                 </div>
               </div>
@@ -2367,6 +2440,21 @@ const handleRecentError = () => {
   line-height: 1.4;
 }
 
+.google-proxy-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 10px;
+}
+
+.google-proxy-error {
+  margin-top: 8px;
+  font-size: 12px;
+  color: #dc2626;
+  line-height: 1.4;
+}
+
 .deepl-link {
   color: #6366f1;
   cursor: pointer;
@@ -2726,6 +2814,10 @@ const handleRecentError = () => {
     background: rgba(239, 68, 68, 0.1);
     color: #f87171;
     border-color: rgba(239, 68, 68, 0.28);
+  }
+
+  .google-proxy-error {
+    color: #f87171;
   }
 
   .toggle-switch {

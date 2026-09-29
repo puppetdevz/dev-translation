@@ -2,6 +2,19 @@ const fs = require('node:fs')
 const path = require('node:path')
 const https = require('https')
 const http = require('http')
+const {
+  parseGoogleProxyUrl,
+  resolveProxyUrl,
+  googleRouteKey,
+  sliceSourceBudget,
+  proxyPhaseBudget,
+  coarseDuration,
+  classifyGoogleSourceError,
+  googleHttpRequest,
+  createLibraryRequestFunction,
+  setAllowedGoogleHostsForTest,
+  restoreAllowedGoogleHosts,
+} = require('./googleTransport')
 
 // google-translate-api-x 为可选源：安装包若未带上该依赖，不得阻断整个 window.services 初始化。
 let googleLibrary = null
@@ -98,83 +111,41 @@ function attachStatus (err, statusCode) {
 function httpStatusError (statusCode) {
   const e = new Error('HTTP ' + statusCode)
   attachStatus(e, statusCode)
+  e.category = 'http_error'
   return e
 }
 
-// ===== 通用 HTTPS GET JSON 请求（带超时） =====
-// 用于 Google 翻译 gtx / clients5 端点。错误只暴露状态码，不含 URL/正文。
-function httpsGetJson (url, extraHeaders, timeoutMs = TIMEOUT_MS, signal) {
-  return new Promise((resolve, reject) => {
-    const ms = resolvePositiveTimeout(timeoutMs, TIMEOUT_MS)
-    if ((signal && signal.aborted) || ms <= 0) {
-      reject(new Error('请求超时'))
-      return
-    }
-    let settled = false
-    let req = null
-    const headers = Object.assign({
+function timeoutError () {
+  const e = new Error('请求超时')
+  e.category = 'timeout'
+  return e
+}
+
+// ===== Google HTTPS GET JSON（可选 CONNECT 代理；错误不含 URL/正文） =====
+function httpsGetJson (url, extraHeaders, timeoutMs = TIMEOUT_MS, signal, proxyUrl) {
+  const ms = resolvePositiveTimeout(timeoutMs, TIMEOUT_MS)
+  if ((signal && signal.aborted) || ms <= 0) {
+    return Promise.reject(timeoutError())
+  }
+  return googleHttpRequest({
+    url,
+    method: 'GET',
+    headers: Object.assign({
       'User-Agent': BROWSER_UA,
       'Accept': 'application/json, text/plain, */*'
-    }, extraHeaders || {})
-
-    const cleanup = () => {
-      if (signal && typeof signal.removeEventListener === 'function') {
-        signal.removeEventListener('abort', onAbort)
-      }
+    }, extraHeaders || {}),
+    timeoutMs: ms,
+    signal,
+    proxyUrl,
+  }).then((res) => {
+    if (res.statusCode && res.statusCode >= 400) {
+      throw httpStatusError(res.statusCode)
     }
-
-    const fail = (err, statusCode) => {
-      if (settled) return
-      settled = true
-      clearTimeout(timer)
-      cleanup()
-      if (req) {
-        try { req.destroy() } catch (e) { /* ignore */ }
-      }
-      attachStatus(err, statusCode)
-      reject(err)
+    try {
+      return JSON.parse(res.body)
+    } catch (err) {
+      throw attachStatus(Object.assign(new Error('响应解析失败'), { category: 'parse_error' }), res.statusCode)
     }
-
-    const onAbort = () => fail(new Error('请求超时'))
-
-    const timer = setTimeout(() => {
-      fail(new Error('请求超时'))
-    }, ms)
-
-    if (signal && typeof signal.addEventListener === 'function') {
-      signal.addEventListener('abort', onAbort)
-    }
-
-    req = https.get(url, { headers, timeout: ms }, (res) => {
-      let data = ''
-      res.on('data', chunk => { data += chunk })
-      res.on('error', (err) => {
-        fail(err, res.statusCode)
-      })
-      res.on('end', () => {
-        if (settled) return
-        settled = true
-        clearTimeout(timer)
-        cleanup()
-        if (res.statusCode && res.statusCode >= 400) {
-          reject(httpStatusError(res.statusCode))
-          return
-        }
-        try {
-          resolve(JSON.parse(data))
-        } catch (err) {
-          reject(attachStatus(new Error('响应解析失败'), res.statusCode))
-        }
-      })
-    })
-
-    req.on('error', (err) => {
-      fail(err)
-    })
-
-    req.on('timeout', () => {
-      fail(new Error('请求超时'))
-    })
   })
 }
 
@@ -360,17 +331,18 @@ function httpGetJson (url, extraHeaders, timeoutMs = TIMEOUT_MS) {
 }
 
 // ===== 翻译源 1：google-translate-api-x 库（内部 batch + single 双端点回退） =====
-async function sourceLibrary (text, from, to, timeoutMs = TIMEOUT_MS, signal) {
+async function sourceLibrary (text, from, to, timeoutMs = TIMEOUT_MS, signal, transport) {
   const translate = getGoogleLibrary()
   if (!translate) {
-    throw new Error('库不可用')
+    const err = new Error('库不可用')
+    err.category = 'library_missing'
+    throw err
   }
   const ms = resolvePositiveTimeout(timeoutMs, TIMEOUT_MS)
   if ((signal && signal.aborted) || ms <= 0) {
-    throw new Error('请求超时')
+    throw timeoutError()
   }
-  // 用 AbortController 接入库的 requestOptions.signal，超时后真正取消底层 fetch，
-  // 避免 socket 在事件循环中堆积造成 fd 泄漏与持续触发 Google 端 429 限流
+  // 用 AbortController + 自定义 requestFunction，超时后取消底层请求；代理经 CONNECT 注入。
   const controller = createAbortController()
   const abort = () => {
     try { controller.abort() } catch (e) { /* ignore */ }
@@ -384,11 +356,18 @@ async function sourceLibrary (text, from, to, timeoutMs = TIMEOUT_MS, signal) {
       to,
       forceBatch: true,
       fallbackBatch: true,
+      requestFunction: createLibraryRequestFunction({
+        proxyUrl: transport && transport.proxyUrl,
+        timeoutMs: ms,
+        signal: controller.signal,
+      }),
       requestOptions: { signal: controller.signal }
     })
     const result = await withTimeout(translatePromise, ms, abort)
     if (!result || !result.text) {
-      throw new Error('库返回空结果')
+      const err = new Error('库返回空结果')
+      err.category = 'empty_result'
+      throw err
     }
     return result.text
   } finally {
@@ -399,7 +378,7 @@ async function sourceLibrary (text, from, to, timeoutMs = TIMEOUT_MS, signal) {
 }
 
 // ===== 翻译源 2：translate.googleapis.com gtx 端点（dj=1，JSON 对象格式） =====
-async function sourceGtxEndpoint (text, from, to, timeoutMs = TIMEOUT_MS, signal) {
+async function sourceGtxEndpoint (text, from, to, timeoutMs = TIMEOUT_MS, signal, transport) {
   const params = new URLSearchParams({
     client: 'gtx',
     dj: '1',
@@ -409,23 +388,33 @@ async function sourceGtxEndpoint (text, from, to, timeoutMs = TIMEOUT_MS, signal
     q: text
   })
   const url = `https://translate.googleapis.com/translate_a/single?${params}`
-  const data = await httpsGetJson(url, { Referer: 'https://translate.google.com' }, timeoutMs, signal)
+  const data = await httpsGetJson(
+    url,
+    { Referer: 'https://translate.google.com' },
+    timeoutMs,
+    signal,
+    transport && transport.proxyUrl
+  )
   // 响应格式: { sentences: [{ trans, orig }], src }
   if (!data || !data.sentences || !Array.isArray(data.sentences)) {
-    throw new Error('gtx 端点返回格式异常')
+    const err = new Error('gtx 端点返回格式异常')
+    err.category = 'parse_error'
+    throw err
   }
   const translation = data.sentences
     .filter(s => s && typeof s.trans === 'string')
     .map(s => s.trans)
     .join('')
   if (!translation) {
-    throw new Error('gtx 端点返回空结果')
+    const err = new Error('gtx 端点返回空结果')
+    err.category = 'empty_result'
+    throw err
   }
   return translation
 }
 
 // ===== 翻译源 3：clients5.google.com Chrome 扩展端点 =====
-async function sourceClients5 (text, from, to, timeoutMs = TIMEOUT_MS, signal) {
+async function sourceClients5 (text, from, to, timeoutMs = TIMEOUT_MS, signal, transport) {
   const params = new URLSearchParams({
     client: 'dict-chrome-ex',
     sl: from,
@@ -433,14 +422,18 @@ async function sourceClients5 (text, from, to, timeoutMs = TIMEOUT_MS, signal) {
     q: text
   })
   const url = `https://clients5.google.com/translate_a/t?${params}`
-  const data = await httpsGetJson(url, null, timeoutMs, signal)
+  const data = await httpsGetJson(url, null, timeoutMs, signal, transport && transport.proxyUrl)
   // 响应格式: [["译文","检测语言"]]
   if (!Array.isArray(data) || !data[0] || !data[0][0]) {
-    throw new Error('clients5 端点返回格式异常')
+    const err = new Error('clients5 端点返回格式异常')
+    err.category = 'parse_error'
+    throw err
   }
   const translation = data[0][0]
   if (typeof translation !== 'string' || !translation) {
-    throw new Error('clients5 端点返回空结果')
+    const err = new Error('clients5 端点返回空结果')
+    err.category = 'empty_result'
+    throw err
   }
   return translation
 }
@@ -468,9 +461,140 @@ function clearTranslateCache () {
   inflightRequests.clear()
 }
 
+function raceWithTimeout (promise, ms, abortFn) {
+  let timer = null
+  const wrapped = Promise.resolve(promise)
+  wrapped.catch(() => {})
+  const timeoutPromise = new Promise((_, reject) => {
+    timer = setTimeout(() => {
+      if (typeof abortFn === 'function') {
+        try { abortFn() } catch (e) { /* ignore */ }
+      }
+      reject(timeoutError())
+    }, ms)
+  })
+  return Promise.race([wrapped, timeoutPromise]).finally(() => {
+    if (timer) clearTimeout(timer)
+  })
+}
+
+function toSafeAttempts (attempts) {
+  return (attempts || []).map((item) => ({
+    source: item.source,
+    route: item.route,
+    category: item.category,
+    statusCode: item.statusCode == null ? null : item.statusCode,
+    durationMs: item.durationMs,
+  }))
+}
+
+function makeGoogleAggregateError (attempts, timedOut) {
+  const last = attempts && attempts.length ? attempts[attempts.length - 1] : null
+  let message = '所有谷歌翻译源均失败'
+  if (timedOut || (last && last.category === 'timeout')) {
+    message = '请求超时'
+  } else if (last && last.category === 'proxy_connect') {
+    message = '代理连接失败'
+  } else if (last && last.category === 'http_error' && last.statusCode) {
+    message = 'HTTP ' + last.statusCode
+  } else if (last && last.category === 'parse_error') {
+    message = '响应解析失败'
+  } else if (last && last.category === 'empty_result') {
+    message = '引擎返回空结果'
+  } else if (last && last.category === 'network_error') {
+    message = '网络请求失败'
+  }
+  const err = new Error(message)
+  attachStatus(err, last && last.statusCode)
+  err.googleAttempts = toSafeAttempts(attempts)
+  if (last) {
+    err.source = last.source
+    err.route = last.route
+    err.durationMs = last.durationMs
+    if (last.category === 'proxy_connect' || last.category === 'network_error' || last.category === 'timeout') {
+      err.category = last.category
+    }
+  }
+  return err
+}
+
+async function runSourcePhase (text, from, to, phase) {
+  const sources = TRANSLATE_SOURCES
+  for (let i = 0; i < sources.length; i++) {
+    if (phase.shouldStop() || (phase.signal && phase.signal.aborted)) {
+      return { timedOut: true, result: null }
+    }
+    const remaining = phase.getRemaining()
+    if (remaining <= 0) {
+      return { timedOut: true, result: null }
+    }
+    const slice = sliceSourceBudget(remaining, sources.length - i)
+    if (slice <= 0) {
+      return { timedOut: true, result: null }
+    }
+    const source = sources[i]
+    const sliceController = createAbortController()
+    const abortSlice = () => {
+      try { sliceController.abort() } catch (e) { /* ignore */ }
+    }
+    const onParentAbort = () => abortSlice()
+    if (phase.signal && typeof phase.signal.addEventListener === 'function') {
+      phase.signal.addEventListener('abort', onParentAbort)
+    }
+    const startedAt = Date.now()
+    try {
+      const result = await raceWithTimeout(
+        source.fn(text, from, to, slice, sliceController.signal, {
+          route: phase.route,
+          proxyUrl: phase.proxyUrl,
+        }),
+        slice,
+        abortSlice
+      )
+      const durationMs = coarseDuration(Date.now() - startedAt)
+      if (result) {
+        phase.attempts.push({
+          source: source.name,
+          route: phase.route,
+          category: 'success',
+          statusCode: null,
+          durationMs,
+        })
+        return { timedOut: false, result }
+      }
+      phase.attempts.push({
+        source: source.name,
+        route: phase.route,
+        category: 'empty_result',
+        statusCode: null,
+        durationMs,
+      })
+    } catch (err) {
+      const classified = classifyGoogleSourceError(err)
+      phase.attempts.push({
+        source: source.name,
+        route: phase.route,
+        category: classified.category,
+        statusCode: classified.statusCode,
+        durationMs: coarseDuration(Date.now() - startedAt),
+      })
+      if (phase.shouldStop() || (phase.signal && phase.signal.aborted)) {
+        return { timedOut: true, result: null }
+      }
+      // 429 不立即对同源连环重试：本阶段每个来源只走一次。
+    } finally {
+      abortSlice()
+      if (phase.signal && typeof phase.signal.removeEventListener === 'function') {
+        phase.signal.removeEventListener('abort', onParentAbort)
+      }
+    }
+  }
+  return { timedOut: phase.getRemaining() <= 0, result: null }
+}
+
 async function translateWithSources (text, from, to, opts) {
   const options = opts && typeof opts === 'object' ? opts : {}
-  const shareBudget = !!options.shareBudget
+  const shareBudget = options.shareBudget !== false
   const getRemaining = typeof options.getRemaining === 'function'
     ? options.getRemaining
     : () => TIMEOUT_MS
@@ -478,42 +602,44 @@ async function translateWithSources (text, from, to, opts) {
   const shouldStop = typeof options.shouldStop === 'function'
     ? options.shouldStop
     : () => false
-  let lastStatus = null
-  let timedOut = false
+  const overallRemaining = () => {
+    if (shouldStop() || (signal && signal.aborted)) return 0
+    const left = shareBudget ? getRemaining() : TIMEOUT_MS
+    return left > 0 ? left : 0
+  }
+  const proxyUrl = resolveProxyUrl(options)
+  const attempts = []
 
-  for (const source of TRANSLATE_SOURCES) {
+  const runPhase = (route, url, phaseGetRemaining) => runSourcePhase(text, from, to, {
+    route,
+    proxyUrl: url,
+    getRemaining: phaseGetRemaining,
+    signal,
+    shouldStop,
+    attempts,
+  })
+
+  if (proxyUrl) {
+    const total = overallRemaining()
+    const { proxyCap } = proxyPhaseBudget(total)
+    const proxyDeadline = Date.now() + Math.min(proxyCap, total)
+    const proxyRemaining = () => Math.max(0, Math.min(overallRemaining(), proxyDeadline - Date.now()))
+    const proxyOutcome = await runPhase('proxy', proxyUrl, proxyRemaining)
+    if (proxyOutcome.result) return proxyOutcome.result
     if (shouldStop() || (signal && signal.aborted)) {
-      timedOut = true
-      break
-    }
-    const remaining = shareBudget ? getRemaining() : TIMEOUT_MS
-    if (shareBudget && remaining <= 0) {
-      timedOut = true
-      break
-    }
-    try {
-      const result = await source.fn(text, from, to, remaining, signal)
-      if (result) return result
-    } catch (err) {
-      if (shouldStop() || (signal && signal.aborted)) {
-        timedOut = true
-        break
-      }
-      const msg = err && err.message != null ? String(err.message) : ''
-      if (/超时|timeout/i.test(msg) && shareBudget && getRemaining() <= 0) {
-        timedOut = true
-        break
-      }
-      const code = Number(err && err.statusCode)
-      if (Number.isFinite(code)) lastStatus = code
+      throw makeGoogleAggregateError(attempts, true)
     }
   }
-  if (timedOut || (shareBudget && getRemaining() <= 0)) {
-    throw new Error('请求超时')
+
+  if (overallRemaining() <= 0) {
+    throw makeGoogleAggregateError(attempts, true)
   }
-  const aggErr = new Error('所有谷歌翻译源均失败')
-  attachStatus(aggErr, lastStatus)
-  throw aggErr
+  const directOutcome = await runPhase('direct', '', overallRemaining)
+  if (directOutcome.result) return directOutcome.result
+  throw makeGoogleAggregateError(
+    attempts,
+    directOutcome.timedOut || overallRemaining() <= 0
+  )
 }
 
 // ===== DeepL 官方 API 翻译 =====
@@ -682,7 +808,7 @@ function abortSharedGoogle(shared, cacheKey) {
   }
 }
 
-function getOrCreateGoogleInflight(cacheKey, text, from, to, hasBudget, waiterDeadline) {
+function getOrCreateGoogleInflight(cacheKey, text, from, to, hasBudget, waiterDeadline, proxyOpts) {
   let shared = inflightRequests.get(cacheKey)
   if (shared) {
     if (hasBudget && waiterDeadline > shared.deadline) {
@@ -694,22 +820,25 @@ function getOrCreateGoogleInflight(cacheKey, text, from, to, hasBudget, waiterDe
 
   shared = {
     waiters: 0,
-    deadline: hasBudget ? waiterDeadline : Number.POSITIVE_INFINITY,
-    shareBudget: hasBudget,
+    deadline: hasBudget ? waiterDeadline : Date.now() + TIMEOUT_MS,
+    shareBudget: true,
     cacheAllowed: true,
     aborted: false,
     controller: createAbortController(),
+    proxyEnabled: !!(proxyOpts && proxyOpts.proxyEnabled),
+    proxyUrl: resolveProxyUrl(proxyOpts),
   }
   const getRemaining = () => {
-    if (!shared.shareBudget) return TIMEOUT_MS
     const left = shared.deadline - Date.now()
     return left > 0 ? left : 0
   }
   shared.promise = translateWithSources(text, from, to, {
     getRemaining,
-    shareBudget: hasBudget,
+    shareBudget: true,
     signal: shared.controller.signal,
     shouldStop: () => shared.aborted,
+    proxyEnabled: shared.proxyEnabled,
+    proxyUrl: shared.proxyUrl,
   }).then((result) => {
     if (shared.cacheAllowed && !shared.aborted && result) {
       setCache(cacheKey, result)
@@ -726,16 +855,26 @@ function getOrCreateGoogleInflight(cacheKey, text, from, to, hasBudget, waiterDe
 }
 
 window.services = {
-  googleTranslate (text, from, to, timeoutMs) {
-    const cacheKey = `${from}|${to}|${text}`
+  googleTranslate (text, from, to, timeoutMs, options) {
+    let opts = options
+    let budgetArg = timeoutMs
+    if (timeoutMs && typeof timeoutMs === 'object') {
+      opts = timeoutMs
+      budgetArg = timeoutMs.timeoutMs
+    }
+    const proxyOpts = {
+      proxyEnabled: !!(opts && opts.proxyEnabled),
+      proxyUrl: opts && opts.proxyUrl,
+    }
+    const cacheKey = `${from}|${to}|${text}|${googleRouteKey(proxyOpts)}`
     const cached = getCache(cacheKey)
     if (cached !== null) {
       return Promise.resolve(cached)
     }
-    const hasBudget = Number.isFinite(Number(timeoutMs)) && Number(timeoutMs) > 0
-    const budget = hasBudget ? Number(timeoutMs) : TIMEOUT_MS
+    const hasBudget = Number.isFinite(Number(budgetArg)) && Number(budgetArg) > 0
+    const budget = hasBudget ? Number(budgetArg) : TIMEOUT_MS
     const waiterDeadline = Date.now() + budget
-    const shared = getOrCreateGoogleInflight(cacheKey, text, from, to, hasBudget, waiterDeadline)
+    const shared = getOrCreateGoogleInflight(cacheKey, text, from, to, hasBudget, waiterDeadline, proxyOpts)
     shared.waiters += 1
 
     return new Promise((resolve, reject) => {
@@ -870,5 +1009,15 @@ if (typeof module !== 'undefined' && module.exports) {
     postJson,
     httpGetJson,
     withTimeout,
+    parseGoogleProxyUrl,
+    resolveProxyUrl,
+    googleRouteKey,
+    sliceSourceBudget,
+    proxyPhaseBudget,
+    coarseDuration,
+    classifyGoogleSourceError,
+    googleHttpRequest,
+    setAllowedGoogleHostsForTest,
+    restoreAllowedGoogleHosts,
   }
 }

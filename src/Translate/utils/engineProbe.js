@@ -11,7 +11,7 @@ import {
   getRuntimeEnv,
   runMainTextTranslation,
 } from './engineBridge.js'
-import { KNOWN_ENGINES, snapshotEngineTimeoutMs, snapshotThirdpartyAiTimeoutMs } from './storage.js'
+import { KNOWN_ENGINES, snapshotEngineTimeoutMs, snapshotThirdpartyAiTimeoutMs, snapshotGoogleProxy } from './storage.js'
 import {
   runThirdpartyAiGroupFailover,
   snapshotThirdpartyAiGroups,
@@ -83,6 +83,8 @@ export function snapshotProbeConfig(settings) {
     deeplxToken: s.deeplxToken || '',
     thirdpartyAiGroups: snapshotThirdpartyAiGroups(s),
     thirdpartyAiSystemPrompt: s.thirdpartyAiSystemPrompt || '',
+    googleProxyEnabled: !!s.googleProxyEnabled,
+    googleProxyUrl: s.googleProxyUrl || '',
   }
 }
 
@@ -100,6 +102,8 @@ export function isProbeConfigUnchanged(snapshot, settings) {
     && snapshot.deeplxServerUrl === current.deeplxServerUrl
     && snapshot.deeplxToken === current.deeplxToken
     && snapshot.thirdpartyAiSystemPrompt === current.thirdpartyAiSystemPrompt
+    && snapshot.googleProxyEnabled === current.googleProxyEnabled
+    && snapshot.googleProxyUrl === current.googleProxyUrl
     && serializeGroups(snapshot.thirdpartyAiGroups) === serializeGroups(current.thirdpartyAiGroups)
   )
 }
@@ -242,8 +246,9 @@ export async function callEngineProbe(engine, { text, settings = {}, env, timeou
     }
     case 'google': {
       if (typeof services.googleTranslate !== 'function') throw new Error('翻译服务方法不可用')
+      const googleProxy = snapshotGoogleProxy(settings)
       return runMainTextTranslation(
-        (value, from, to) => services.googleTranslate(value, from, to, timeoutMs),
+        (value, from, to) => services.googleTranslate(value, from, to, timeoutMs, googleProxy),
         text,
         'en',
         'zh-CN',

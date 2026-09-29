@@ -9,7 +9,7 @@ import {
   buildPolishPrompt
 } from './prompts/index.js'
 import { useSettings } from './utils/useSettings.js'
-import { snapshotEngineTimeoutMs, snapshotThirdpartyAiTimeoutMs } from './utils/storage.js'
+import { snapshotEngineTimeoutMs, snapshotThirdpartyAiTimeoutMs, snapshotGoogleProxy } from './utils/storage.js'
 import {
   runThirdpartyAiGroupFailover,
   snapshotThirdpartyAiGroups,
@@ -229,10 +229,11 @@ const prepareTranslateDirection = () => {
   }
 }
 
-const translateWithGoogle = async (timeoutMs) => {
+const translateWithGoogle = async (timeoutMs, settingsSnap) => {
   const { fromLang, toLang } = prepareTranslateDirection()
+  const googleProxy = snapshotGoogleProxy(settingsSnap || settings)
   return runMainTextTranslation(
-    (text, from, to) => window.services.googleTranslate(text, from, to, timeoutMs),
+    (text, from, to) => window.services.googleTranslate(text, from, to, timeoutMs, googleProxy),
     inputText.value.trim(),
     fromLang,
     toLang,
@@ -354,7 +355,7 @@ const translateWithThirdpartyAI = async (settingsSnap, requestId) => {
 // 引擎调度函数
 const translateWithEngine = async (engine, timeoutMs, settingsSnap, requestId) => {
   switch (engine) {
-    case 'google': return translateWithGoogle(timeoutMs)
+    case 'google': return translateWithGoogle(timeoutMs, settingsSnap)
     case 'deepl': return translateWithDeepL(timeoutMs)
     case 'deeplx': return translateWithDeepLX(timeoutMs)
     case 'thirdparty-ai': return translateWithThirdpartyAI(settingsSnap, requestId)
@@ -466,6 +467,10 @@ const translate = async () => {
           statusCode: classified.statusCode,
           phase: PHASE.CALL,
           requestId: myRequestId,
+          source: classified.source,
+          route: classified.route,
+          durationMs: classified.durationMs,
+          googleAttempts: classified.googleAttempts,
         })
       },
       onSuccess: (engine, result, index) => {

@@ -59,6 +59,40 @@ describe('sanitizeLogEntry', () => {
     assert.equal(entry.message.includes('524'), true)
   })
 
+  it('保留 Google 来源/路径/分源摘要，丢弃代理地址与 URL', () => {
+    const entry = sanitizeLogEntry({
+      id: 'g1',
+      timestamp: 3,
+      level: 'error',
+      engine: 'google',
+      message: '代理连接失败。可检查自填代理或切换其他引擎',
+      category: 'proxy_connect',
+      source: 'gtx',
+      route: 'proxy',
+      durationMs: 150,
+      googleAttempts: [
+        { source: 'library', route: 'proxy', category: 'timeout', durationMs: 80 },
+        { source: 'gtx', route: 'proxy', category: 'proxy_connect', durationMs: 70 },
+        { source: 'evil', route: 'vpn', category: 'hack', proxyUrl: 'http://127.0.0.1:7890' },
+      ],
+      detail: 'http://user:pass@127.0.0.1:7890 CONNECT translate.googleapis.com/translate_a/single?q=机密',
+    })
+    assert.equal(entry.source, 'gtx')
+    assert.equal(entry.route, 'proxy')
+    assert.equal(entry.category, 'proxy_connect')
+    assert.equal(entry.googleAttempts.length, 2)
+    const blob = JSON.stringify(entry)
+    assert.equal(blob.includes('127.0.0.1'), false)
+    assert.equal(blob.includes('user:pass'), false)
+    assert.equal(blob.includes('translate.googleapis.com'), false)
+    assert.equal(blob.includes('机密'), false)
+    const line = formatSafeLogLine(entry, 't', '错误')
+    assert.equal(line.includes('来源=gtx'), true)
+    assert.equal(line.includes('路径=proxy'), true)
+    assert.equal(line.includes('分源='), true)
+    assert.equal(line.includes('127.0.0.1'), false)
+  })
+
   it('含 TypeError / 堆栈的旧消息删除而非原样保留', () => {
     const entry = sanitizeLogEntry({
       id: '3',

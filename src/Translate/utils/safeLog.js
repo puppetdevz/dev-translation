@@ -14,7 +14,21 @@ const ALLOWED_CATEGORY = {
   timeout: true,
   parse_error: true,
   empty_result: true,
+  network_error: true,
+  proxy_connect: true,
+  library_missing: true,
   unknown: true,
+}
+
+const ALLOWED_GOOGLE_SOURCE = {
+  library: true,
+  gtx: true,
+  clients5: true,
+}
+
+const ALLOWED_GOOGLE_ROUTE = {
+  proxy: true,
+  direct: true,
 }
 
 const ALLOWED_PHASE = {
@@ -60,6 +74,9 @@ function categoryFallbackMessage(category, statusCode) {
   if (category === 'timeout') return '引擎请求超时'
   if (category === 'parse_error') return '翻译结果解析失败'
   if (category === 'empty_result') return '引擎返回空结果'
+  if (category === 'network_error') return '网络请求失败'
+  if (category === 'proxy_connect') return '代理连接失败'
+  if (category === 'library_missing') return '翻译库不可用'
   return '已记录一次安全诊断事件'
 }
 
@@ -67,6 +84,34 @@ function pickFiniteStatus(value) {
   const n = Number(value)
   if (!Number.isFinite(n) || n < 100 || n > 599) return null
   return n
+}
+
+function pickDurationMs(value) {
+  const n = Number(value)
+  if (!Number.isFinite(n) || n < 0) return null
+  return Math.min(60000, Math.round(n))
+}
+
+function sanitizeGoogleAttempt(item) {
+  if (!item || typeof item !== 'object' || Array.isArray(item)) return null
+  const source = ALLOWED_GOOGLE_SOURCE[item.source] ? item.source : undefined
+  const route = ALLOWED_GOOGLE_ROUTE[item.route] ? item.route : undefined
+  const category = ALLOWED_CATEGORY[item.category] ? item.category : undefined
+  if (!source && !route && !category) return null
+  const out = {}
+  if (source) out.source = source
+  if (route) out.route = route
+  if (category) out.category = category
+  const statusCode = pickFiniteStatus(item.statusCode)
+  if (statusCode != null) out.statusCode = statusCode
+  const durationMs = pickDurationMs(item.durationMs)
+  if (durationMs != null) out.durationMs = durationMs
+  return out
+}
+
+export function sanitizeGoogleAttempts(attempts) {
+  if (!Array.isArray(attempts)) return []
+  return attempts.map(sanitizeGoogleAttempt).filter(Boolean).slice(0, 6)
 }
 
 /**
@@ -92,6 +137,10 @@ export function sanitizeLogEntry(entry) {
   const groupIndex = Number.isInteger(entry.groupIndex) && entry.groupIndex >= 0 && entry.groupIndex < 1000
     ? entry.groupIndex
     : undefined
+  const source = ALLOWED_GOOGLE_SOURCE[entry.source] ? entry.source : undefined
+  const route = ALLOWED_GOOGLE_ROUTE[entry.route] ? entry.route : undefined
+  const durationMs = pickDurationMs(entry.durationMs)
+  const googleAttempts = sanitizeGoogleAttempts(entry.googleAttempts)
 
   let message = ''
   if (typeof entry.message === 'string' && entry.message && !isUnsafeMessage(entry.message)) {
@@ -115,6 +164,10 @@ export function sanitizeLogEntry(entry) {
   if (skipCategory) out.skipCategory = skipCategory
   if (groupId) out.groupId = groupId
   if (groupIndex != null) out.groupIndex = groupIndex
+  if (source) out.source = source
+  if (route) out.route = route
+  if (durationMs != null) out.durationMs = durationMs
+  if (googleAttempts.length) out.googleAttempts = googleAttempts
   return out
 }
 
@@ -150,6 +203,15 @@ export function formatSafeLogLine(entry, timeText, levelText) {
   if (entry.skipReason) meta.push(`跳过=${entry.skipReason}`)
   if (entry.groupId) meta.push(`组=${entry.groupId}`)
   if (entry.groupIndex != null) meta.push(`组序号=${entry.groupIndex}`)
+  if (entry.source) meta.push(`来源=${entry.source}`)
+  if (entry.route) meta.push(`路径=${entry.route}`)
+  if (entry.durationMs != null) meta.push(`耗时=${entry.durationMs}ms`)
+  if (Array.isArray(entry.googleAttempts) && entry.googleAttempts.length) {
+    meta.push(`分源=${entry.googleAttempts.map((item) => {
+      const bits = [item.source, item.route, item.category].filter(Boolean)
+      return bits.join('/')
+    }).join(',')}`)
+  }
   if (meta.length) parts.push(`  元数据: ${meta.join(' ')}`)
   return parts.join('\n')
 }
