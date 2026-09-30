@@ -27,6 +27,7 @@
 ### 配置面板
 
 全屏设置页面分为「常规 / 引擎 / 高级」三类（宽窗口侧栏、窄窗口顶部标签），支持：
+
 - 常规：语言检测策略（正则算法 / AI 模型）；输出设置仍按当前主引擎（故障转移首位）展示可用选项（音标、释义、例句、变量命名、语境说明）
 - 引擎：配置 8 种翻译引擎，自定义故障转移顺序与引擎响应超时；自定义 AI 多组配置及共用系统提示词；DeepL / DeepLX 与百度（APP ID + 密钥）、阿里云（AccessKey ID + Secret，需开通服务及 `alimt:TranslateGeneral` 权限）、彩云（开放平台 API Token，普通会员账号不等于 Token）的独立配置；Google 可选专用代理；选中引擎「测试配置」与「一键测试并排序」（可能消耗服务额度，与高级区按历史成功率排序相互独立）。凭据沿用本机 uTools `dbStorage`，**并非加密存储**
 - 阿里凭据获取：在「引擎 → 阿里」可直达机器翻译产品页和 RAM 用户管理；在 RAM 用户的「凭证管理」创建 AccessKey，Secret 仅创建时可见，勿使用主账号密钥
@@ -88,13 +89,15 @@ pnpm build
 
 `vue-router` 保持在 5.0.x：5.1+ 的 Vite peer 要求超出本项目 Vite 6，不应只为追新盲目升级。
 
+开发调试在 uTools「插件管理 → 开发者 → 添加开发插件」选择**项目根目录**（`pnpm dev`，端口 5175）；验证打包形态时另选 **`dist/`**，二者不是同一实例。隔离测试与构建通过不替代真实宿主验收，详见 [TESTING.md](./TESTING.md)。
+
 ## 隐私与安全
 
 这是联网翻译插件，并非离线翻译器：原文会发送给所选引擎；故障转移可能依次发送给多个配置引擎，英文词典补充会查询外部词典，AI 语言检测和润色也可能发送文本。
 
 API 凭据保存在 uTools `dbStorage`，**未加密**。自定义 AI / DeepLX 的远程 HTTP 地址会明文传输原文及凭据，建议使用 HTTPS；本机自部署地址应仅用于可信环境。Google 免费翻译来源并非官方付费 API，无可用性承诺；使用所有第三方服务时须遵守对应条款和额度限制。
 
-更多安全边界及漏洞报告注意事项见 [SECURITY.md](./SECURITY.md)。
+外部例句以安全文本节点显示，保留关键词高亮，不执行返回内容中的 HTML。更多安全边界及漏洞报告注意事项见 [SECURITY.md](./SECURITY.md)。
 
 ## 开源许可与分发
 
@@ -110,4 +113,8 @@ Copyright (C) 2026 zhongyuming
 
 ## 版本历史
 
-详见 [CHANGELOG.md](./CHANGELOG.md)。
+当前版本：**1.5.0**。详见 [CHANGELOG.md](./CHANGELOG.md)。
+
+项目仓库：[puppetdevz/dev-translation](https://github.com/puppetdevz/dev-translation)。
+
+最后更新：2026-09-30。
