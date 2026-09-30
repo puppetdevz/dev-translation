@@ -7,7 +7,16 @@
 ```bash
 pnpm test    # 隔离用例
 pnpm build   # 产物；须含 dist/preload/services.js 与 dist/preload/node_modules/google-translate-api-x（真实目录）
+pnpm audit   # 依赖安全公告；需结合实际路径判断风险
 ```
+
+开源分发补充检查：
+
+- `dist/LICENSE`、`dist/NOTICE` 与根目录文件内容相同；`dist/THIRD_PARTY_NOTICES.txt` 包含实际打包的前端组件和 preload 依赖完整版权/许可文本。
+- 分发安装包时保留上述文件，并同时提供对应版本的完整源码、锁文件与构建脚本。
+- `scripts/word-result-security.test.mjs` 覆盖不可信例句/关键词、空关键词及正则字符；例句中的 HTML 应显示为文本而非 DOM 标签。
+- 在 uTools 中用本地合成响应确认例句高亮仍正确，HTML 标签不会执行；切勿用真实凭据、客户原文或公共服务进行攻击测试。
+- 干净目录执行 `pnpm install --frozen-lockfile`、`pnpm test`、`pnpm build`。Node/pnpm 本机验证版本见 README，跨平台及宿主仍需手动验收。
 
 已安装插件 preload 桥接故障的重装与验收：见 `docs/2026-0929-翻译引擎桥接-实施与验收.md`。开发插件（选仓库根）和已安装 `.asar`（须用 `dist/`）不是同一实例。
 

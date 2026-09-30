@@ -23,3 +23,16 @@ dist-ssr
 *.sln
 *.sw?
 .pnpm-store
+
+# Local secrets and temporary browser artifacts (not a substitute for history cleanup)
+.env
+.env.*
+!.env.example
+.npmrc
+.netrc
+*.pem
+*.p12
+*.pfx
+id_rsa
+id_ed25519
+.playwright-mcp/

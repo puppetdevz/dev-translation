@@ -62,13 +62,14 @@ const speakPhonetic = () => {
   speak(getEnglishSource(), 'en-US')
 }
 
-// 高亮关键词
+// 将不可信例句拆成文本片段，由 Vue 文本节点转义，绝不拼接外部 HTML。
 const highlightKeyword = (sentence, keyword) => {
-  if (!keyword || !sentence) return sentence
+  const text = String(sentence ?? '')
+  const term = String(keyword ?? '')
+  if (!term || !text) return [{ text, highlight: false }]
 
-  // 尝试匹配关键词（忽略大小写）
-  const regex = new RegExp(`(${keyword.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')})`, 'gi')
-  return sentence.replace(regex, '<mark class="highlight">$1</mark>')
+  const regex = new RegExp(`(${term.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')})`, 'gi')
+  return text.split(regex).map((text, index) => ({ text, highlight: index % 2 === 1 }))
 }
 
 // 获取英文源文本（变量命名和例句高亮都需要英文）
@@ -121,7 +122,7 @@ const formattedDefinitions = computed(() => {
           <span class="meaning">{{ def.meaning }}</span>
         </div>
         <div v-if="settings.showExamples && def.example" class="example-row">
-          <span class="example-text" v-html="highlightKeyword(def.example, keyword)"></span>
+          <span class="example-text"><template v-for="(part, partIndex) in highlightKeyword(def.example, keyword)" :key="partIndex"><mark v-if="part.highlight" class="highlight">{{ part.text }}</mark><template v-else>{{ part.text }}</template></template></span>
           <span v-if="def.exampleTranslation" class="example-translation">
             {{ def.exampleTranslation }}
           </span>

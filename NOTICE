@@ -1,0 +1,14 @@
+Dev Translation - 开发者翻译
+Copyright (C) 2026 zhongyuming
+
+SPDX-License-Identifier: GPL-3.0-only
+
+This project's own code, prompts, documentation and own artwork are licensed
+under the GNU General Public License, version 3 only. See LICENSE for the terms.
+This software is provided without any warranty, including the implied
+warranties of MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.
+
+Third-party components retain their own copyrights and licenses. Their full
+notices are generated in dist/THIRD_PARTY_NOTICES.txt when building the plugin.
+The uTools host, third-party trademarks and external service terms are not
+covered by this project's license grant.

@@ -3,6 +3,7 @@ import vue from '@vitejs/plugin-vue'
 import fs from 'node:fs'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
+import { distributeLicenses } from './scripts/distributionLicenses.mjs'
 
 const rootDir = path.dirname(fileURLToPath(import.meta.url))
 
@@ -36,6 +37,6 @@ function copyPreloadDependencies() {
 }
 
 export default defineConfig({
-  plugins: [vue(), copyPreloadDependencies()],
+  plugins: [vue(), distributeLicenses(rootDir), copyPreloadDependencies()],
   base: './'
 })

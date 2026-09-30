@@ -73,15 +73,40 @@
 ## 开发
 
 ```bash
-# 安装依赖
-pnpm install
+# 按锁文件安装依赖（开发与构建已验证 Node 26.7.0 / pnpm 12.6.0）
+pnpm install --frozen-lockfile
 
 # 开发模式
 pnpm dev
 
-# 构建
+# 隔离回归测试
+pnpm test
+
+# 构建（包含项目 LICENSE 与第三方许可文本）
 pnpm build
 ```
+
+`vue-router` 保持在 5.0.x：5.1+ 的 Vite peer 要求超出本项目 Vite 6，不应只为追新盲目升级。
+
+## 隐私与安全
+
+这是联网翻译插件，并非离线翻译器：原文会发送给所选引擎；故障转移可能依次发送给多个配置引擎，英文词典补充会查询外部词典，AI 语言检测和润色也可能发送文本。
+
+API 凭据保存在 uTools `dbStorage`，**未加密**。自定义 AI / DeepLX 的远程 HTTP 地址会明文传输原文及凭据，建议使用 HTTPS；本机自部署地址应仅用于可信环境。Google 免费翻译来源并非官方付费 API，无可用性承诺；使用所有第三方服务时须遵守对应条款和额度限制。
+
+更多安全边界及漏洞报告注意事项见 [SECURITY.md](./SECURITY.md)。
+
+## 开源许可与分发
+
+Copyright (C) 2026 zhongyuming
+
+当前版本的自有代码、提示词、文档及自有素材采用 **[GPL-3.0-only](./LICENSE)**（仅 GNU GPL 第 3 版）。允许商业使用、修改和再分发，但须履行 GPL 的许可、版权保留及对应源码提供等义务；不附带任何担保。
+
+第三方组件仍保留各自版权和许可，GPL 不替代外部服务条款，也不授予第三方商标权。构建自动生成 `dist/LICENSE`、`dist/NOTICE` 与 `dist/THIRD_PARTY_NOTICES.txt`，打包分发时不得删除；preload 依赖自身的 LICENSE 同样保留。
+
+分发安装包时，应同时提供与该产物对应的完整源码（含构建脚本与锁文件），推荐随包附同版源码归档，并注明对应提交；不要只链接不断变化的主分支。完整验证流程见 [TESTING.md](./TESTING.md)。uTools 宿主自身不属于本项目 GPL 授权范围，二者结合的分发许可边界需另行核对。
+
+开源准备检查与尚待处理事项见 [审计报告](./docs/open-source-audit.md)。
 
 ## 版本历史
 
