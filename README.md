@@ -118,3 +118,7 @@ Copyright (C) 2026 zhongyuming
 项目仓库：[puppetdevz/dev-translation](https://github.com/puppetdevz/dev-translation)。
 
 最后更新：2026-09-30。
+
+## Star 历史
+
+[![GitHub Star 变化曲线](https://api.star-history.com/svg?repos=puppetdevz/dev-translation&type=Date)](https://star-history.com/#puppetdevz/dev-translation&Date)
