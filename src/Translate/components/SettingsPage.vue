@@ -713,7 +713,7 @@ const POS_OUTPUT_ITEM = { key: 'showPartOfSpeech', label: '显示词性', desc: 
 const AI_NAMING_OUTPUT_ITEM = { key: 'showAiNaming', label: 'AI 命名', desc: '按用途生成一个语义名称；需已配置 AI 来源，开启后会额外联网发送本次输入与译文并消耗额度' }
 
 const aiOutputs = [
-  { key: 'showPhonetic', label: '显示音标', desc: '美式 IPA 音标（AI 生成，缺失时由本地词库补全）' },
+  { key: 'showPhonetic', label: '显示音标', desc: '只显示来源明确的美式 IPA；无法确认口音时不采用，缺失由本地词库补全' },
   { key: 'showDefinitions', label: '显示释义', desc: '英译中显示中文释义，中译英显示英文释义，最多 3 条' },
   POS_OUTPUT_ITEM,
   { key: 'showExamples', label: '显示例句', desc: 'AI 生成英文例句（最多 2 条）' },

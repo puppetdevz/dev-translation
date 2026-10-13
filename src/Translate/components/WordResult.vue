@@ -1,6 +1,7 @@
 <script lang="ts" setup>
 import { computed, ref } from 'vue'
 import { useCopyToast } from '../utils/useCopyToast.js'
+import { attachDefinitionExamples, hasConfirmedUsPhonetic, selectDirectionDefinitions } from '../utils/engineBridge.js'
 import VariableNaming from './VariableNaming.vue'
 
 const props = defineProps({
@@ -93,32 +94,19 @@ const getEnglishSource = () => {
 // 获取关键词（用于高亮）
 const keyword = computed(() => getEnglishSource())
 
-// 检查 definitions 是否为新格式（对象数组）
-const isDefinitionNewFormat = computed(() => {
-  if (!props.result.definitions || props.result.definitions.length === 0) return false
-  return typeof props.result.definitions[0] === 'object'
-})
-
-// 获取格式化后的 definitions
+// 获取格式化后的 definitions。只展示方向正确的释义，例句最多 2 条。
 const formattedDefinitions = computed(() => {
   if (!props.result.definitions) return []
-
-  if (isDefinitionNewFormat.value) {
-    return props.result.definitions
-  }
-
-  // 旧格式转换为新格式
-  return props.result.definitions.map((def, index) => ({
-    pos: '',
-    meaning: def,
-    example: props.result.examples?.[index] || '',
-    exampleTranslation: ''
-  }))
+  const lang = props.detectedLanguage === 'zh' ? 'zh' : 'en'
+  const selected = selectDirectionDefinitions(props.result.definitions, lang)
+  return attachDefinitionExamples(selected, props.result.examples)
 })
 
-// 音标显示内容：真实音标 > 补全中 > 暂无音标；关闭音标开关时整体隐藏
+// 音标只展示来源明确的美式 IPA；形状合格但无法确认口音时不显示。
 const phoneticDisplay = computed(() => {
-  if (props.result.phonetic) return { text: props.result.phonetic, placeholder: false }
+  if (hasConfirmedUsPhonetic(props.result.phonetic, props.result.phoneticRegion)) {
+    return { text: String(props.result.phonetic).trim(), placeholder: false }
+  }
   const state = props.dictionaryStatus && props.dictionaryStatus.phonetic
   if (state === 'loading') return { text: '音标补全中…', placeholder: true }
   if (state === 'unavailable') return { text: '暂无音标', placeholder: true }

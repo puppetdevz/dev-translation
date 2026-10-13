@@ -22,14 +22,17 @@ import {
   engineDisplayName,
   runMainTextTranslation,
   canApplyDictionarySupplement,
+  canPromoteMisclassifiedPhrase,
   safeLookupLocalDictionary,
   dictionaryLookupTarget,
-  normalizeDictionaryKey,
   waitWithBudget,
   mergeDictionarySupplement,
   hasUsablePhonetic,
+  hasConfirmedUsPhonetic,
   hasUsableDefinitions,
   pickLocalDefinitions,
+  dictionaryStatusAfterBudget,
+  isDictionaryWriteExpired,
   DICTIONARY_BUDGET_MS,
   DICT_ENGINES,
   SKIP_REASON,
@@ -76,6 +79,7 @@ let translateRequestId = 0
 const dictionaryStatus = ref({ phonetic: 'idle', definitions: 'idle' })
 // 词典补全版本：重新翻译、改输入/方向、清空或卸载都会让旧补全回填失效
 let dictionaryRequestVersion = 0
+let dictionaryTimer = null
 
 // AI 命名状态：独立于主翻译与词典补全，默认关闭；仅在开启后按需请求
 const aiNamingStatus = ref('off')
@@ -156,6 +160,9 @@ const handleLanguageToggle = () => {
 const handleLanguageRedetect = () => {
   isManualOverride.value = false
   cancelDetection()
+  // 重新识别会改变方向，旧资料和旧命名都不能继续代表当前结果
+  resetDictionaryState()
+  clearAiNamingState()
   runDetection(inputText.value)
 }
 
@@ -441,12 +448,35 @@ const translateWithEngine = async (engine, timeoutMs, settingsSnap, requestId) =
 
 const idleDictionaryStatus = (result, lang) => ({
   phonetic: settings.showPhonetic
-    ? (hasUsablePhonetic(result && result.phonetic) ? 'available' : 'idle')
+    ? (hasConfirmedUsPhonetic(result && result.phonetic, result && result.phoneticRegion) ? 'available' : 'idle')
     : 'hidden',
   definitions: settings.showDefinitions
     ? (hasUsableDefinitions(result && result.definitions, lang) ? 'available' : 'idle')
     : 'hidden',
 })
+
+const clearDictionaryTimer = () => {
+  if (dictionaryTimer) {
+    clearTimeout(dictionaryTimer)
+    dictionaryTimer = null
+  }
+}
+
+/** 清空词典补全状态，并让进行中的补全失效。 */
+const resetDictionaryState = () => {
+  dictionaryRequestVersion++
+  clearDictionaryTimer()
+  dictionaryStatus.value = { phonetic: 'idle', definitions: 'idle' }
+}
+
+const publishDictionaryStatus = (result, lang) => {
+  dictionaryStatus.value = dictionaryStatusAfterBudget({
+    showPhonetic: settings.showPhonetic,
+    showDefinitions: settings.showDefinitions,
+    result,
+    lang,
+  })
+}
 
 /**
  * 词典资料补全（独立于主翻译与 AI 命名）：
@@ -457,7 +487,8 @@ const idleDictionaryStatus = (result, lang) => ({
 const supplementDictionary = async ({ engine, result, requestId, sourceText, lang, type }) => {
   const source = String(sourceText || '').trim()
   const translation = (result && result.translation) || ''
-  const needPhonetic = !!settings.showPhonetic && !hasUsablePhonetic(result && result.phonetic)
+  const phoneticConfirmed = hasConfirmedUsPhonetic(result && result.phonetic, result && result.phoneticRegion)
+  const needPhonetic = !!settings.showPhonetic && !phoneticConfirmed
   const needDefinitions = !!settings.showDefinitions && !hasUsableDefinitions(result && result.definitions, lang)
   const target = dictionaryLookupTarget({ type, lang, sourceText: source, translation })
 
@@ -469,80 +500,121 @@ const supplementDictionary = async ({ engine, result, requestId, sourceText, lan
 
   const myVersion = ++dictionaryRequestVersion
   const deadline = Date.now() + DICTIONARY_BUDGET_MS
-  const isCurrent = () => myVersion === dictionaryRequestVersion
-    && canApplyDictionarySupplement({
-      isCurrent: () => true,
-      engine,
-      usedEngine: usedEngine.value,
-      translation,
-      currentTranslation: translationResult.value && translationResult.value.translation,
-      sourceText: source,
-      currentSourceText: inputText.value,
-      lang,
-      currentLang: detectedLanguage.value,
-    })
-  const isSettled = () => requestId !== translateRequestId || !isCurrent()
+  const stillOwner = () => myVersion === dictionaryRequestVersion && requestId === translateRequestId
+  const identityOk = () => canApplyDictionarySupplement({
+    isCurrent: () => true,
+    engine,
+    usedEngine: usedEngine.value,
+    translation,
+    currentTranslation: translationResult.value && translationResult.value.translation,
+    sourceText: source,
+    currentSourceText: inputText.value,
+    lang,
+    currentLang: detectedLanguage.value,
+  })
+  const releaseIfReplaced = () => {
+    if (!stillOwner()) return true
+    if (!identityOk()) {
+      dictionaryStatus.value = { phonetic: 'idle', definitions: 'idle' }
+      clearDictionaryTimer()
+      return true
+    }
+    return false
+  }
+
+  clearDictionaryTimer()
+  dictionaryTimer = setTimeout(() => {
+    dictionaryTimer = null
+    if (!stillOwner()) return
+    publishDictionaryStatus(translationResult.value, detectedLanguage.value)
+  }, DICTIONARY_BUDGET_MS)
 
   dictionaryStatus.value = {
     phonetic: settings.showPhonetic ? (needPhonetic ? 'loading' : 'available') : 'hidden',
     definitions: settings.showDefinitions ? (needDefinitions ? 'loading' : 'available') : 'hidden',
   }
 
-  let localEntry = null
-  try {
-    localEntry = await safeLookupLocalDictionary(target.target)
-  } catch (e) {
-    localEntry = null
+  // 单词/词组先撤下无法确认的音标，避免补全期间把无地区或英式音标显示成美式。
+  // 句子在确认是误判词组之前保持原样，不借机改写整句旧行为。
+  if (type !== 'sentence' && needPhonetic && translationResult.value && hasUsablePhonetic(translationResult.value.phonetic)) {
+    translationResult.value = { ...translationResult.value, phonetic: '', phoneticRegion: '' }
   }
-  if (isSettled()) return
 
-  // 固定词组整组命中即视为有效资料来源；词组不拆词、也不走在线单词词典
-  const isLocalPhrase = !!(localEntry && localEntry.found && localEntry.kind === 'phrase')
-  // 仅当输入因长度阈值被误判为句子、且无句末标点、完整命中固定词条时才按词组展示；
-  // 不泛化为放开句子词典查询。
-  if (type === 'sentence' && isLocalPhrase
-    && !/[.!?;,\n。！？；，、]/.test(source)
-    && normalizeDictionaryKey(source) === localEntry.key) {
-    inputType.value = 'word'
+  let acceptedLocal = null
+  const localBudget = deadline - Date.now()
+  if (localBudget > 0) {
+    try {
+      const entry = await waitWithBudget(safeLookupLocalDictionary(target.target), localBudget)
+      if (!isDictionaryWriteExpired(deadline)) acceptedLocal = entry
+    } catch {
+      acceptedLocal = null
+    }
   }
-  const localDefinitions = pickLocalDefinitions(localEntry, lang)
+  if (releaseIfReplaced()) return
+
+  const promoted = canPromoteMisclassifiedPhrase({
+    type,
+    sourceText: source,
+    target: target.target,
+    localEntry: acceptedLocal,
+  })
+  // 真正的句子不写入词库资料；只有长度阈值误判且整组命中的词组才提升为单词展示。
+  if (type === 'sentence' && !promoted) {
+    if (stillOwner()) {
+      clearDictionaryTimer()
+      dictionaryStatus.value = idleDictionaryStatus(result, lang)
+    }
+    return
+  }
+  if (promoted) inputType.value = 'word'
+
+  const isLocalPhrase = !!(acceptedLocal && acceptedLocal.found && acceptedLocal.kind === 'phrase')
+  const localDefinitions = pickLocalDefinitions(acceptedLocal, lang)
   const singleWordTarget = !/\s/.test(target.target)
-  const missingExamples = !(Array.isArray(result && result.examples) && result.examples.length)
+  const missingExamples = !!settings.showExamples
+    && !(Array.isArray(result && result.examples) && result.examples.length)
   const onlineAllowed = target.allowNetwork
     && !target.phraseOnly
     && !isLocalPhrase
     && singleWordTarget
     && ((needDefinitions && !localDefinitions.length) || missingExamples)
 
-  let onlineEntry = null
+  let acceptedOnline = null
   if (onlineAllowed) {
     const remaining = deadline - Date.now()
     if (remaining > 0) {
-      onlineEntry = await waitWithBudget(
+      const entry = await waitWithBudget(
         safeLookupWord(target.target, undefined, remaining),
         remaining,
       )
+      if (!isDictionaryWriteExpired(deadline)) acceptedOnline = entry
     }
   }
-  if (isSettled()) return
+  if (releaseIfReplaced()) return
+  if (!stillOwner()) return
 
-  const merged = mergeDictionarySupplement({ result, localEntry, onlineEntry, lang })
-  if (isSettled()) return
-  translationResult.value = { ...translationResult.value, ...merged.result }
-  dictionaryStatus.value = {
-    phonetic: settings.showPhonetic
-      ? (hasUsablePhonetic(merged.result.phonetic) ? 'available' : 'unavailable')
-      : 'hidden',
-    definitions: settings.showDefinitions
-      ? (hasUsableDefinitions(merged.result.definitions, lang) ? 'available' : 'unavailable')
-      : 'hidden',
+  const merged = mergeDictionarySupplement({
+    result: translationResult.value || result,
+    localEntry: acceptedLocal,
+    onlineEntry: acceptedOnline,
+    lang,
+  })
+  if (releaseIfReplaced()) return
+  clearDictionaryTimer()
+  const next = { ...translationResult.value, ...merged.result }
+  // 写回时已关闭的栏目不接收晚到资料，避免之后重新打开时被补全结果弹出来。
+  if (!settings.showPhonetic) {
+    next.phonetic = translationResult.value && translationResult.value.phonetic
+    next.phoneticRegion = translationResult.value && translationResult.value.phoneticRegion
   }
-}
-
-/** 清空词典补全状态，并让进行中的补全失效。 */
-const resetDictionaryState = () => {
-  dictionaryRequestVersion++
-  dictionaryStatus.value = { phonetic: 'idle', definitions: 'idle' }
+  if (!settings.showDefinitions) {
+    next.definitions = translationResult.value && translationResult.value.definitions
+  }
+  if (!settings.showExamples) {
+    next.examples = translationResult.value && translationResult.value.examples
+  }
+  translationResult.value = next
+  publishDictionaryStatus(next, lang)
 }
 
 // ===== AI 命名（独立分支，默认关闭） =====
@@ -657,7 +729,16 @@ const startAiNaming = async (snapshot) => {
   })
 
   if (myVersion !== aiNamingVersion) return
-  if (!matchesCurrentSnapshot(snapshot) || !settings.showAiNaming) return
+  if (!matchesCurrentSnapshot(snapshot) || !settings.showAiNaming) {
+    // 版本仍归本次请求，但方向或译文已不匹配时不能把「生成中」留在界面上
+    if (aiNamingStatus.value === AI_NAMING_STATUS.LOADING) {
+      aiNamingStatus.value = 'off'
+      aiNamingWords.value = []
+      aiNamingMessage.value = ''
+      aiNamingActiveKey = ''
+    }
+    return
+  }
   aiNamingStatus.value = result.status
   aiNamingWords.value = Array.isArray(result.words) ? result.words : []
   aiNamingMessage.value = result.message || ''
@@ -684,6 +765,8 @@ const translate = async () => {
   translationResult.value = null
   fallbackNotice.value = ''
   usedEngine.value = ''
+  // 已提交的翻译方向以本次检测为准，输入过程中的慢检测不得事后改写方向
+  cancelDetection()
   // 新翻译开始时让旧补全/旧命名失效并清空状态
   resetDictionaryState()
   clearAiNamingState()
@@ -1066,6 +1149,7 @@ onUnmounted(() => {
   }
   translateRequestId++ // 让任何 inflight 翻译完成后丢弃结果
   dictionaryRequestVersion++ // 让 inflight 词典补全丢弃回填
+  clearDictionaryTimer()
   aiNamingVersion++ // 让 inflight AI 命名丢弃回填
 })
 </script>

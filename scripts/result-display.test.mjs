@@ -49,10 +49,20 @@ try {
     assert.match(html, /用于问候/)
   })
 
-  await test('单词翻译结果显示音标和变量命名', async () => {
-    const html = await renderResult('word', { translation: 'hello world', phonetic: '/həˈləʊ/' }, 'hello world', 'en')
-    assert.match(html, /həˈləʊ/)
-    assert.match(html, /变量命名/)
+  await test('单词翻译结果只显示已确认的美式音标', async () => {
+    const confirmed = await renderResult('word', {
+      translation: 'hello world',
+      phonetic: '/həˈloʊ/',
+      phoneticRegion: 'US',
+    }, 'hello world', 'en')
+    assert.match(confirmed, /həˈloʊ/)
+    assert.match(confirmed, /变量命名/)
+
+    const unconfirmed = await renderResult('word', {
+      translation: 'hello world',
+      phonetic: '/həˈləʊ/',
+    }, 'hello world', 'en')
+    assert.doesNotMatch(unconfirmed, /həˈləʊ/)
   })
 } finally {
   await server.close()

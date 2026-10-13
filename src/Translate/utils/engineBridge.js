@@ -676,15 +676,35 @@ export function normalizeDictionaryKey(text) {
 }
 
 /**
- * 查询键变体：仅做空格/连字符互换，是否命中由词库中是否真的存在对应词条决定。
+ * 查询键变体：仅做空格与连字符互换。
+ * 不删除连字符，避免把 re-sign / resign 这类不同词条当成同一次查询。
  */
 export function dictionaryKeyVariants(text) {
   const base = normalizeDictionaryKey(text)
   if (!base) return []
   const variants = [base]
   if (base.includes(' ')) variants.push(base.replace(/\s+/g, '-'))
-  if (base.includes('-')) variants.push(base.replace(/-/g, ' '), base.replace(/-/g, ''))
+  if (base.includes('-')) variants.push(base.replace(/-/g, ' '))
   return [...new Set(variants)].filter(Boolean)
+}
+
+const SENTENCE_PUNCTUATION_RE = /[.!?;,\n。！？；，、]/
+
+/**
+ * 长度阈值把固定词组误分成句子时，允许用完整词组词条修正。
+ * 比较的是英文查询目标，不是中文原文；有句末标点的真正句子不提升。
+ */
+export function canPromoteMisclassifiedPhrase({ type, sourceText, target, localEntry }) {
+  if (type !== 'sentence') return false
+  if (!localEntry || localEntry.found !== true || localEntry.kind !== 'phrase') return false
+  if (SENTENCE_PUNCTUATION_RE.test(String(sourceText || ''))) return false
+  const key = normalizeDictionaryKey(localEntry.key)
+  return !!key && dictionaryKeyVariants(target).includes(key)
+}
+
+/** 截止时间已过：晚到的词典回填不得再写入。 */
+export function isDictionaryWriteExpired(deadline, now = Date.now()) {
+  return typeof deadline === 'number' && now > deadline
 }
 
 /**
@@ -711,8 +731,13 @@ const IPA_HINT_RE = /[\u0250-\u02ff\u1d00-\u1d7f]/u
 export function hasUsablePhonetic(value) {
   const text = String(value == null ? '' : value).trim()
   if (!text || text.length > 60) return false
-  if (/^[/\[].*[/\]]$/.test(text)) return true
+  if (/^[\/\[].*[\/\]]$/.test(text)) return true
   return IPA_HINT_RE.test(text)
+}
+
+/** 只有来源明确标注美式时，音标才算合格；字符形状不能证明口音。 */
+export function hasConfirmedUsPhonetic(value, region) {
+  return String(region || '').toUpperCase() === 'US' && hasUsablePhonetic(value)
 }
 
 const CJK_CHAR_RE = /[\u3400-\u9fff]/
@@ -764,16 +789,79 @@ function definitionTextOf(item) {
   return ''
 }
 
-function definitionsAreUsable(list, lang) {
-  const items = (Array.isArray(list) ? list : []).map(definitionTextOf).filter(Boolean)
-  if (!items.length) return false
-  if (lang === 'en') return items.some(text => CJK_CHAR_RE.test(text))
-  return items.every(text => !CJK_CHAR_RE.test(text))
+/** 英译中释义必须含中文，中译英释义不得含中文。 */
+export function isDirectionCorrectMeaning(text, lang) {
+  const hasCjk = CJK_CHAR_RE.test(String(text || ''))
+  return lang === 'en' ? hasCjk : !hasCjk
+}
+
+/**
+ * 只保留方向正确的释义。错误语言条目既不展示，也不把其余合格释义判成不可用。
+ */
+export function selectDirectionDefinitions(list, lang) {
+  const out = []
+  for (const item of Array.isArray(list) ? list : []) {
+    const meaning = definitionTextOf(item)
+    if (!meaning || !isDirectionCorrectMeaning(meaning, lang)) continue
+    if (out.some(entry => entry.meaning === meaning)) continue
+    const next = {
+      pos: normalizePartOfSpeech(item && typeof item === 'object' ? item.pos : ''),
+      meaning,
+    }
+    if (item && typeof item === 'object') {
+      const example = String(item.example || '').trim()
+      const exampleTranslation = String(item.exampleTranslation || '').trim()
+      if (example) next.example = example
+      if (exampleTranslation) next.exampleTranslation = exampleTranslation
+    }
+    out.push(next)
+    if (out.length >= 3) break
+  }
+  return out
 }
 
 /** 方向正确的释义是否已可用（英译中要中文、中译英要英文）。 */
 export function hasUsableDefinitions(list, lang) {
-  return definitionsAreUsable(list, lang)
+  return selectDirectionDefinitions(list, lang).length > 0
+}
+
+/** 例句最多 2 条。对象释义自带例句优先，否则按顺序挂上独立例句数组，不对齐不同语言的义项。 */
+export function attachDefinitionExamples(definitions, examples) {
+  const defs = (Array.isArray(definitions) ? definitions : []).map(item => (
+    item && typeof item === 'object' ? { ...item } : { pos: '', meaning: String(item || ''), example: '' }
+  ))
+  const pool = (Array.isArray(examples) ? examples : [])
+    .map(item => String(item || '').trim())
+    .filter(Boolean)
+    .slice(0, 2)
+  let shown = 0
+  let cursor = 0
+  return defs.map(def => {
+    const own = String(def.example || '').trim()
+    if (own) {
+      if (shown >= 2) return { ...def, example: '' }
+      shown += 1
+      return { ...def, example: own }
+    }
+    if (shown >= 2 || cursor >= pool.length) return { ...def, example: '' }
+    const example = pool[cursor]
+    cursor += 1
+    shown += 1
+    return { ...def, example }
+  })
+}
+
+/** 预算到期后的字段状态：已确认字段保留，其余开启字段转为缺失。 */
+export function dictionaryStatusAfterBudget({ showPhonetic, showDefinitions, result, lang }) {
+  const current = result && typeof result === 'object' ? result : {}
+  return {
+    phonetic: showPhonetic
+      ? (hasConfirmedUsPhonetic(current.phonetic, current.phoneticRegion) ? 'available' : 'unavailable')
+      : 'hidden',
+    definitions: showDefinitions
+      ? (hasUsableDefinitions(current.definitions, lang) ? 'available' : 'unavailable')
+      : 'hidden',
+  }
 }
 
 /** 从本地词库条目中取出方向正确的释义（英译中取 zh，中译英取 en）。 */
@@ -846,25 +934,34 @@ export function mergeDictionarySupplement({ result, localEntry, onlineEntry, lan
   const merged = { ...current }
   const filled = { phonetic: false, definitions: false, examples: false }
 
-  if (!hasUsablePhonetic(merged.phonetic)) {
+  if (!hasConfirmedUsPhonetic(merged.phonetic, merged.phoneticRegion)) {
     const local = pickLocalPhonetic(localEntry)
     if (local) {
       merged.phonetic = local
+      merged.phoneticRegion = 'US'
+      filled.phonetic = true
+    } else if (hasUsablePhonetic(merged.phonetic)) {
+      // 无地区证明或非美式音标不能留下，否则会挡住「暂无音标」并冒充美式。
+      merged.phonetic = ''
+      merged.phoneticRegion = ''
       filled.phonetic = true
     }
   }
 
-  if (!hasUsableDefinitions(merged.definitions, lang)) {
+  const nativeDefinitions = selectDirectionDefinitions(merged.definitions, lang)
+  if (nativeDefinitions.length) {
+    if (nativeDefinitions.length !== (Array.isArray(merged.definitions) ? merged.definitions.length : 0)) {
+      merged.definitions = nativeDefinitions
+      filled.definitions = true
+    }
+  } else {
     const fromLocal = pickLocalDefinitions(localEntry, lang)
     if (fromLocal.length) {
       merged.definitions = fromLocal
       filled.definitions = true
     } else if (lang !== 'en' && onlineEntry && Array.isArray(onlineEntry.definitions)) {
       // 中译英可用在线词典的英文释义；英译中不使用英文释义充当中文含义
-      const usable = onlineEntry.definitions
-        .map(item => ({ pos: normalizePartOfSpeech(item && item.pos), meaning: definitionTextOf(item) }))
-        .filter(item => item.meaning && !CJK_CHAR_RE.test(item.meaning))
-        .slice(0, 3)
+      const usable = selectDirectionDefinitions(onlineEntry.definitions, lang)
       if (usable.length) {
         merged.definitions = usable
         filled.definitions = true

@@ -15,7 +15,7 @@ try {
   const renderExample = (example, translation = 'hello') => renderToString(
     createSSRApp({
       render: () => h(WordResult, {
-        result: { translation, definitions: [{ meaning: '示例', example }] },
+        result: { translation, definitions: [{ meaning: 'an example sense', example }] },
         detectedLanguage: 'zh',
         settings: { showDefinitions: true, showExamples: true },
       }),

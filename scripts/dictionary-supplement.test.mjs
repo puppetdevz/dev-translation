@@ -2,11 +2,15 @@ import test from 'node:test'
 import assert from 'node:assert/strict'
 import {
   DICTIONARY_BUDGET_MS,
+  attachDefinitionExamples,
   canApplyDictionarySupplement,
+  canPromoteMisclassifiedPhrase,
   dictionaryKeyVariants,
   dictionaryLookupTarget,
+  dictionaryStatusAfterBudget,
   hasUsableDefinitions,
   hasUsablePhonetic,
+  isDictionaryWriteExpired,
   mergeDictionarySupplement,
   normalizeDictionaryKey,
   normalizePartOfSpeech,
@@ -58,13 +62,59 @@ test('词典查询目标与键规范化', async (t) => {
 
   await t.test('规范化只处理大小写与空白，不做词形合并', () => {
     assert.equal(normalizeDictionaryKey('  In   Front  Of '), 'in front of')
-    assert.deepEqual(dictionaryKeyVariants('e-mail'), ['e-mail', 'e mail', 'email'])
+    assert.deepEqual(dictionaryKeyVariants('e-mail'), ['e-mail', 'e mail'])
     assert.deepEqual(dictionaryKeyVariants('as well as'), ['as well as', 'as-well-as'])
     assert.deepEqual(dictionaryKeyVariants('   '), [])
   })
 
+  await t.test('删除连字符不得把不同词条当成同一查询', () => {
+    assert.equal(dictionaryKeyVariants('re-sign').includes('resign'), false)
+    assert.equal(dictionaryKeyVariants('well-known').includes('wellknown'), false)
+  })
+
   await t.test('总预算为 5000ms，独立于引擎时限', () => {
     assert.equal(DICTIONARY_BUDGET_MS, 5000)
+    assert.equal(isDictionaryWriteExpired(1000, 1001), true)
+    assert.equal(isDictionaryWriteExpired(1000, 1000), false)
+  })
+
+  await t.test('中译英句子只有英文译文整组命中词组且原文无句末标点时才提升', () => {
+    const phrase = localEntry({ key: 'as well as', kind: 'phrase', headword: 'as well as' })
+    assert.equal(canPromoteMisclassifiedPhrase({
+      type: 'sentence',
+      sourceText: '以及另外一件很长的事情',
+      target: 'as well as',
+      localEntry: phrase,
+    }), true)
+    assert.equal(canPromoteMisclassifiedPhrase({
+      type: 'sentence',
+      sourceText: '以及另外一件很长的事情。',
+      target: 'as well as',
+      localEntry: phrase,
+    }), false)
+    assert.equal(canPromoteMisclassifiedPhrase({
+      type: 'sentence',
+      sourceText: '这是一个完整句子没有标点但是不该拿单词资料',
+      target: 'parallel',
+      localEntry: localEntry(),
+    }), false)
+  })
+
+  await t.test('例句最多挂两条，不把独立例句数组错配成无限义项', () => {
+    const attached = attachDefinitionExamples(
+      [{ pos: 'n.', meaning: 'a line' }, { pos: 'adj.', meaning: 'side by side' }, { pos: 'v.', meaning: 'to match' }],
+      ['one', 'two', 'three'],
+    )
+    assert.deepEqual(attached.map(item => item.example), ['one', 'two', ''])
+  })
+
+  await t.test('预算到期只保留已确认字段', () => {
+    assert.deepEqual(dictionaryStatusAfterBudget({
+      showPhonetic: true,
+      showDefinitions: true,
+      result: { phonetic: '/x/', phoneticRegion: 'UK', definitions: [{ meaning: '平行的' }] },
+      lang: 'en',
+    }), { phonetic: 'unavailable', definitions: 'available' })
   })
 })
 
@@ -168,14 +218,31 @@ test('字段级合并与陈旧防护', async (t) => {
     assert.deepEqual(merged.result.definitions, [{ pos: 'n.', meaning: 'a line that never meets another' }])
   })
 
-  await t.test('已有合格音标不被替换，非美式资料也不会覆盖或续用', async () => {
-    const keeping = mergeDictionarySupplement({
+  await t.test('无法确认口音的音标不阻止本地美式补全，也不得当作合格音标留下', async () => {
+    const replaced = mergeDictionarySupplement({
       result: { translation: '平行', phonetic: '/keep/' },
       localEntry: localEntry({ phonetic: { value: '/other/', region: 'US' } }),
       onlineEntry: { phonetic: '/online/', definitions: [], examples: [] },
       lang: 'en',
     })
-    assert.equal(keeping.result.phonetic, '/keep/')
+    assert.equal(replaced.result.phonetic, '/other/')
+    assert.equal(replaced.result.phoneticRegion, 'US')
+
+    const confirmed = mergeDictionarySupplement({
+      result: { translation: '平行', phonetic: '/keep/', phoneticRegion: 'US' },
+      localEntry: localEntry({ phonetic: { value: '/other/', region: 'US' } }),
+      onlineEntry: null,
+      lang: 'en',
+    })
+    assert.equal(confirmed.result.phonetic, '/keep/')
+
+    const unconfirmedOnly = mergeDictionarySupplement({
+      result: { translation: '平行', phonetic: '/brɪtɪʃ/' },
+      localEntry: localEntry({ phonetic: { value: '/ˈpærəlɛl/', region: 'UK' } }),
+      onlineEntry: { phonetic: '/online/', definitions: [], examples: [] },
+      lang: 'en',
+    })
+    assert.equal(unconfirmedOnly.result.phonetic, '')
 
     const onlyBritish = mergeDictionarySupplement({
       result: { translation: '平行' },
@@ -188,6 +255,44 @@ test('字段级合并与陈旧防护', async (t) => {
     const services = { lookupWord: async () => ({ phonetic: '/online/', definitions: [], examples: [] }) }
     const online = await safeLookupWord('parallel', { services })
     assert.equal(online.phonetic, '')
+  })
+
+  await t.test('错误语言的释义不得阻止方向正确的本地补全', () => {
+    const mixed = mergeDictionarySupplement({
+      result: {
+        translation: '平行的',
+        definitions: [
+          { pos: 'adj.', meaning: 'equally distant' },
+          { pos: 'adj.', meaning: '平行的' },
+        ],
+      },
+      localEntry: localEntry({
+        definitions: {
+          zh: [{ pos: 'adj.', meaning: '平行的' }, { pos: 'n.', meaning: '相似之处' }],
+          en: [],
+        },
+      }),
+      onlineEntry: null,
+      lang: 'en',
+    })
+    assert.deepEqual(mixed.result.definitions, [
+      { pos: 'adj.', meaning: '平行的' },
+    ])
+    assert.equal(
+      mixed.result.definitions.some(item => item.meaning === 'equally distant'),
+      false,
+    )
+
+    const allWrong = mergeDictionarySupplement({
+      result: {
+        translation: '平行的',
+        definitions: [{ pos: 'adj.', meaning: 'equally distant' }],
+      },
+      localEntry: localEntry(),
+      onlineEntry: null,
+      lang: 'en',
+    })
+    assert.deepEqual(allWrong.result.definitions, [{ pos: 'adj.', meaning: '平行的' }])
   })
 
   await t.test('词组不通过在线单词词典查询', async () => {
