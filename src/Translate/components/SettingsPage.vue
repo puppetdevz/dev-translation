@@ -38,7 +38,6 @@ import {
   PROBE_APPLY,
 } from '../utils/engineProbe.js'
 import {
-  engineKindLabel,
   getEnabledEngineOrder,
   getPrimaryEnabledEngine,
   isEngineEnabled,
@@ -391,12 +390,6 @@ const dragOverIndex = ref(null)
 const dragOverPos = ref(null)
 
 const onDragStart = (event, index) => {
-  // 开关按钮上的拖动不得触发卡片拖拽/排序
-  const target = event && event.target
-  if (target && typeof target.closest === 'function' && target.closest('.engine-enable-toggle')) {
-    event.preventDefault()
-    return
-  }
   dragIndex.value = index
 }
 const onDragOver = (index, event) => {
@@ -1110,7 +1103,6 @@ const handleRecentError = () => {
                 <div class="engine-card-info">
                   <div class="engine-card-title">
                     <span class="engine-card-name">{{ engineMeta[engine].name }}</span>
-                    <span class="engine-kind-tag" :class="engineKindLabel(engine) === 'AI' ? 'kind-ai' : 'kind-mt'">{{ engineKindLabel(engine) }}</span>
                   </div>
                   <div class="engine-card-meta">
                     <span v-if="mainEngine === engine" class="engine-primary-tag">主引擎</span>
@@ -1118,19 +1110,6 @@ const handleRecentError = () => {
                     <span v-if="!officialEngineConfigured(engine)" class="engine-card-unconfigured">未配置</span>
                   </div>
                 </div>
-                <button
-                  type="button"
-                  class="toggle-switch engine-enable-toggle"
-                  :class="{ active: isEngineEnabled(settings, engine) }"
-                  :aria-pressed="isEngineEnabled(settings, engine) ? 'true' : 'false'"
-                  :aria-label="`${engineMeta[engine].name} 引擎开关`"
-                  :title="isEngineEnabled(settings, engine) ? '已开启，点击关闭（不删除配置）' : '已关闭，点击开启'"
-                  draggable="false"
-                  @click.stop="toggleEngineEnabled(engine)"
-                  @dragstart.stop.prevent
-                >
-                  <span class="toggle-slider"></span>
-                </button>
                 <span class="engine-priority">P{{ index + 1 }}</span>
               </div>
             </template>
@@ -1145,25 +1124,42 @@ const handleRecentError = () => {
                     <span v-if="engineMeta[selectedEngine].icon" class="engine-config-icon">{{ engineMeta[selectedEngine].icon }}</span>
                     <span v-else class="brand-badge" :class="engineMeta[selectedEngine].brandClass">{{ engineMeta[selectedEngine].brand }}</span>
                     <div class="engine-config-heading-text">
-                      <span class="engine-config-name">{{ engineMeta[selectedEngine].name }}</span>
+                      <span :id="`engine-config-name-${selectedEngine}`" class="engine-config-name">{{ engineMeta[selectedEngine].name }}</span>
                       <span v-if="selectedEngine === 'ai'" class="engine-config-subtitle">无需额外配置</span>
                     </div>
                   </div>
-                  <button
-                    class="engine-test-btn"
-                    :class="{ 'is-testing': testingEngine === selectedEngine }"
-                    :disabled="!!testingEngine || !!testingGroupId"
-                    @click="runEngineTest(selectedEngine)"
-                  >
-                    <template v-if="testingEngine !== selectedEngine">
-                      <svg class="engine-test-btn-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M10 2v7.53a2 2 0 0 1-.21.9L4.72 20.55a1 1 0 0 0 .9 1.45h12.76a1 1 0 0 0 .9-1.45l-5.07-10.12A2 2 0 0 1 14 9.53V2"/><path d="M8.5 2h7"/><path d="M7 16h10"/></svg>
-                      <span>测试配置</span>
-                    </template>
-                    <template v-else>
-                      <span class="engine-test-spinner"></span>
-                      <span>测试中…</span>
-                    </template>
-                  </button>
+                  <div class="engine-config-actions">
+                    <div class="engine-enable-control">
+                      <span :id="`engine-enable-label-${selectedEngine}`" class="engine-enable-label">启用引擎</span>
+                      <button
+                        type="button"
+                        class="toggle-switch engine-enable-toggle"
+                        :class="{ active: selectedEngineEnabled }"
+                        :aria-pressed="selectedEngineEnabled ? 'true' : 'false'"
+                        :aria-labelledby="`engine-config-name-${selectedEngine} engine-enable-label-${selectedEngine}`"
+                        :title="selectedEngineEnabled ? '已开启，点击关闭（不删除配置）' : '已关闭，点击开启'"
+                        draggable="false"
+                        @click="toggleEngineEnabled(selectedEngine)"
+                      >
+                        <span class="toggle-slider"></span>
+                      </button>
+                    </div>
+                    <button
+                      class="engine-test-btn"
+                      :class="{ 'is-testing': testingEngine === selectedEngine }"
+                      :disabled="!!testingEngine || !!testingGroupId"
+                      @click="runEngineTest(selectedEngine)"
+                    >
+                      <template v-if="testingEngine !== selectedEngine">
+                        <svg class="engine-test-btn-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M10 2v7.53a2 2 0 0 1-.21.9L4.72 20.55a1 1 0 0 0 .9 1.45h12.76a1 1 0 0 0 .9-1.45l-5.07-10.12A2 2 0 0 1 14 9.53V2"/><path d="M8.5 2h7"/><path d="M7 16h10"/></svg>
+                        <span>测试配置</span>
+                      </template>
+                      <template v-else>
+                        <span class="engine-test-spinner"></span>
+                        <span>测试中…</span>
+                      </template>
+                    </button>
+                  </div>
                 </div>
                 <div v-if="!selectedEngineEnabled" class="engine-config-warning engine-disabled-warning">该引擎已关闭：自动翻译、AI 检测/润色/命名与批量测试均不会调用；关闭状态不删除已保存配置。仍可手动「测试配置」、单组测试或获取模型（会真实请求，可能产生费用）。</div>
                 <div v-if="!officialEngineConfigured(selectedEngine)" class="engine-config-warning model-fetch-error">未配置完整凭据；该引擎会跳过，不发出翻译请求。</div>
@@ -1858,6 +1854,7 @@ const handleRecentError = () => {
   align-items: center;
   gap: 6px;
   min-width: 0;
+  max-width: 100%;
 }
 
 .engine-card-meta {
@@ -1877,28 +1874,7 @@ const handleRecentError = () => {
   white-space: nowrap;
 }
 
-/* 固定类型标签：AI / MT，分类由系统固定不可编辑 */
-.engine-kind-tag {
-  flex-shrink: 0;
-  font-size: 9px;
-  font-weight: 700;
-  letter-spacing: 0.4px;
-  padding: 1px 5px;
-  border-radius: 5px;
-  line-height: 1.5;
-}
-
-.engine-kind-tag.kind-ai {
-  color: #6d28d9;
-  background: rgba(139, 92, 246, 0.14);
-  border: 1px solid rgba(139, 92, 246, 0.35);
-}
-
-.engine-kind-tag.kind-mt {
-  color: #0f766e;
-  background: rgba(13, 148, 136, 0.12);
-  border: 1px solid rgba(13, 148, 136, 0.3);
-}
+/* 列表卡片仅保留名称；固定分类不再是列表可见标签（共享分类 API 仍在 engineAvailability.js） */
 
 .engine-primary-tag {
   flex-shrink: 0;
@@ -1933,7 +1909,7 @@ const handleRecentError = () => {
   background: rgba(241, 245, 249, 0.7);
 }
 
-/* 引擎开关：比配置开关紧凑，避免挤压卡片信息（提高特异性以覆盖后面的 .toggle-switch 基础样式） */
+/* 引擎开关：详情标题栏右侧唯一启停入口，保持 38×22 紧凑规格（提高特异性以覆盖后面的 .toggle-switch 基础样式） */
 .toggle-switch.engine-enable-toggle {
   width: 38px;
   height: 22px;
@@ -2251,7 +2227,8 @@ const handleRecentError = () => {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 12px;
+  flex-wrap: wrap;
+  gap: 8px 12px;
   min-width: 0;
   padding: 9px 12px;
   margin-bottom: 12px;
@@ -2264,7 +2241,30 @@ const handleRecentError = () => {
   display: flex;
   align-items: center;
   gap: 10px;
+  flex: 1 1 160px;
   min-width: 0;
+}
+
+/* 详情标题栏操作区：标签 + 开关 + 测试按钮不可拆分；空间不足时整体换行到第二行 */
+.engine-config-actions {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex: 0 0 auto;
+}
+
+.engine-enable-control {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: nowrap;
+}
+
+.engine-enable-label {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text-secondary, #64748b);
+  white-space: nowrap;
 }
 
 .engine-config-icon {
@@ -2283,6 +2283,10 @@ const handleRecentError = () => {
   color: var(--text-primary, #1e293b);
   font-size: 13px;
   font-weight: 600;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .engine-config-subtitle {
@@ -3442,16 +3446,8 @@ const handleRecentError = () => {
     opacity: 0.7;
   }
 
-  .engine-kind-tag.kind-ai {
-    color: #c4b5fd;
-    background: rgba(139, 92, 246, 0.2);
-    border-color: rgba(139, 92, 246, 0.45);
-  }
-
-  .engine-kind-tag.kind-mt {
-    color: #5eead4;
-    background: rgba(13, 148, 136, 0.2);
-    border-color: rgba(45, 212, 191, 0.4);
+  .engine-enable-label {
+    color: var(--text-secondary, #94a3b8);
   }
 
   .engine-primary-tag {
@@ -3544,7 +3540,8 @@ const handleRecentError = () => {
   }
 
   .engine-card {
-    flex: 1;
+    /* 允许真正换行而不是把八张卡片挤进一行；长名称在卡片内省略而不是溢出遮挡 */
+    flex: 1 1 132px;
     min-width: 0;
     padding: 10px 12px;
     gap: 6px;
