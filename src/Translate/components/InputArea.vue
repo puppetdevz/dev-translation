@@ -147,7 +147,7 @@ const handleKeydown = (event) => {
     <!-- 操作行：左侧引擎徽章 + 右侧按钮 -->
     <div class="input-actions">
       <!-- 左侧：翻译引擎标识徽章（与按钮同行、同高） -->
-      <div v-if="usedEngineLabel" class="used-engine-badge" :title="`本次由 ${usedEngineLabel} 翻译`">
+      <div v-if="usedEngineLabel && !detectionNotice" class="used-engine-badge" :title="`本次由 ${usedEngineLabel} 翻译`">
         <span class="used-engine-badge-dot"></span>
         <span class="used-engine-badge-text">由 {{ usedEngineLabel }} 翻译</span>
       </div>

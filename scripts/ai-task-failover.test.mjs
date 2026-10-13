@@ -50,6 +50,12 @@ describe('normalizeDetectionCode', () => {
 })
 
 describe('normalizePolishText', () => {
+  it('非字符串响应不得被强转成伪造的润色文本', () => {
+    for (const value of [{ text: 'not text' }, ['not text'], 123, true]) {
+      assert.equal(normalizePolishText(value), '')
+    }
+  })
+
   it('清理 markdown 包裹后返回非空文本，空内容视为无效', () => {
     assert.equal(normalizePolishText('  Refined text. '), 'Refined text.')
     assert.equal(normalizePolishText('```\nRefined.\n```'), 'Refined.')
@@ -233,6 +239,25 @@ describe('runAiTaskFailover 时限', () => {
     })
     assert.equal(out.stale, true)
     assert.deepEqual(calls, [])
+  })
+})
+
+describe('runAiTaskFailover 无效润色响应', () => {
+  it('对象或数组正文继续下一来源/组，而非提前宣告成功', async () => {
+    let calls = 0
+    const out = await runAiTaskFailover({
+      sources: ['ai', 'thirdparty-ai'],
+      settings: settingsWith({ thirdpartyAiGroups: [GROUP_A, GROUP_B] }),
+      validate: VALIDATE_POLISH,
+      messages: [{ role: 'user', content: 'fixture' }],
+      env: {
+        utools: { ai: async () => ({ content: { text: 'invalid' } }) },
+        services: { requestThirdpartyAI: async () => ({ choices: [{ message: { content: ++calls === 1 ? ['invalid'] : 'Valid text.' } }] }) },
+      },
+    })
+    assert.equal(out.success, true)
+    assert.equal(out.value, 'Valid text.')
+    assert.equal(calls, 2)
   })
 })
 

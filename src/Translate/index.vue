@@ -231,10 +231,11 @@ const cancelDetection = () => {
 
 // 手动切换语言方向
 const handleLanguageToggle = () => {
+  cancelDetection()
   detectedLanguage.value = detectedLanguage.value === 'zh' ? 'en' : 'zh'
   isManualOverride.value = true
   // 方向变化：旧资料补全、旧 AI 命名与旧润色结果均失效
-  polishVersion++
+  invalidatePolish()
   resetDictionaryState()
   clearAiNamingState()
 }
@@ -244,7 +245,7 @@ const handleLanguageRedetect = () => {
   isManualOverride.value = false
   cancelDetection()
   // 重新识别会改变方向，旧资料、旧命名与旧润色结果都不能继续代表当前状态
-  polishVersion++
+  invalidatePolish()
   resetDictionaryState()
   clearAiNamingState()
   runDetection(inputText.value)
@@ -371,16 +372,18 @@ const translateWithDictEngine = async (translateFn) => {
 }
 
 // DeepL 官方 API 翻译（独立顶级引擎）。桥接可用性由 inspectEngine 在调度前检查。
-const translateWithDeepL = async (timeoutMs) => {
+const translateWithDeepL = async (timeoutMs, settingsSnap) => {
+  const config = settingsSnap || settings
   return translateWithDictEngine(
-    (text, from, to) => window.services.deeplTranslate(text, from, to, settings.deeplApiKey, timeoutMs)
+    (text, from, to) => window.services.deeplTranslate(text, from, to, config.deeplApiKey, timeoutMs)
   )
 }
 
 // DeepLX 翻译（自部署/公共实例，独立顶级引擎）
-const translateWithDeepLX = async (timeoutMs) => {
+const translateWithDeepLX = async (timeoutMs, settingsSnap) => {
+  const config = settingsSnap || settings
   return translateWithDictEngine(
-    (text, from, to) => window.services.deeplxTranslate(text, from, to, settings.deeplxServerUrl, settings.deeplxToken, timeoutMs)
+    (text, from, to) => window.services.deeplxTranslate(text, from, to, config.deeplxServerUrl, config.deeplxToken, timeoutMs)
   )
 }
 
@@ -519,8 +522,8 @@ const translateWithThirdpartyAI = async (settingsSnap, requestId) => {
 const translateWithEngine = async (engine, timeoutMs, settingsSnap, requestId) => {
   switch (engine) {
     case 'google': return translateWithGoogle(timeoutMs, settingsSnap)
-    case 'deepl': return translateWithDeepL(timeoutMs)
-    case 'deeplx': return translateWithDeepLX(timeoutMs)
+    case 'deepl': return translateWithDeepL(timeoutMs, settingsSnap)
+    case 'deeplx': return translateWithDeepLX(timeoutMs, settingsSnap)
     case 'baidu': return translateWithBaidu(timeoutMs, settingsSnap)
     case 'aliyun': return translateWithAliyun(timeoutMs, settingsSnap)
     case 'caiyun': return translateWithCaiyun(timeoutMs, settingsSnap)
@@ -1012,6 +1015,11 @@ const dismissFallbackNotice = () => {
 
 // 润色版本：清空/改输入/切方向/离页/新轮次都会让旧响应失效
 let polishVersion = 0
+const invalidatePolish = () => {
+  polishVersion++
+  // 失效操作主动释放 UI；旧请求的 finally 仍只能结算自己的轮次。
+  isPolishing.value = false
+}
 
 // 润色函数：使用开启的 AI 来源按优先级回退，任务专用校验；失败不自动替换输入
 const polish = async () => {
@@ -1188,7 +1196,7 @@ const handleClear = () => {
   cancelDetection()
   // 让进行中的翻译/润色请求失效，防止其完成后回填已清空的 translationResult
   translateRequestId++
-  polishVersion++
+  invalidatePolish()
   translationResult.value = null
   error.value = ''
   detectedLanguage.value = ''
@@ -1219,7 +1227,7 @@ watch(inputText, (newValue) => {
     // 输入为空时，重置所有状态，并使进行中的翻译/润色请求失效，避免旧结果回填
     cancelDetection()
     translateRequestId++
-    polishVersion++
+    invalidatePolish()
     isManualOverride.value = false
     detectedLanguage.value = ''
     inputType.value = 'word'
@@ -1234,9 +1242,13 @@ watch(inputText, (newValue) => {
   }
 })
 
-// 输入变化：旧资料补全、旧 AI 命名与旧润色结果失效（不在输入过程中实时请求命名）
+// 输入/方向同步交还润色写入权，避免同一 tick 的新轮次被延迟 watcher 作废。
+// 自动检测也可能改变方向；与手动切换一样使旧润色失效，不监听引擎开关。
+watch(inputText, invalidatePolish, { flush: 'sync' })
+watch(detectedLanguage, invalidatePolish, { flush: 'sync' })
+
+// 输入变化：旧资料补全与旧 AI 命名失效（不在输入过程中实时请求命名）
 watch(inputText, () => {
-  polishVersion++
   resetDictionaryState()
   clearAiNamingState()
 })
@@ -1291,7 +1303,7 @@ onUnmounted(() => {
     fallbackTimer = null
   }
   translateRequestId++ // 让任何 inflight 翻译完成后丢弃结果
-  polishVersion++ // 让 inflight 润色丢弃回填
+  invalidatePolish() // 让 inflight 润色丢弃回填并释放 UI
   dictionaryRequestVersion++ // 让 inflight 词典补全丢弃回填
   clearDictionaryTimer()
   aiNamingVersion++ // 让 inflight AI 命名丢弃回填

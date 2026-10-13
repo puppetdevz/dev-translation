@@ -30,10 +30,12 @@ export const buildPolishPrompt = (text, lang) => {
 /**
  * 润色响应规范化（任务专用校验，不复用主翻译契约）：
  * 清理可能的 markdown 代码块包裹后返回非空文本；空文本视为无效，交给下一个来源。
+ * 只接受字符串，不将对象、数组等协议错误强转成伪造文本。
  * 不做语义质量评分；清理后为空即不采用。
  */
 export const normalizePolishText = (raw) => {
-  const text = String(raw == null ? '' : raw).trim()
+  if (typeof raw !== 'string') return ''
+  const text = raw.trim()
   if (!text) return ''
   return text
     .replace(/^```[a-zA-Z]*\s*\n?/, '')

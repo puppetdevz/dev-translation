@@ -10,6 +10,8 @@ pnpm build   # 产物；须含 dist/preload/services.js 与 dist/preload/node_mo
 pnpm audit   # 依赖安全公告；需结合实际路径判断风险
 ```
 
+引擎开关/AI 辅助对抗回归：`scripts/ai-task-component.test.mjs` 执行真实页面脚本与 Vue watcher，覆盖润色失效释放 loading、同 tick 重启、手动方向不被旧检测覆盖、在途开关快照与 DeepL/DeepLX 凭据快照；`scripts/input-area-notice.test.mjs` 编译真实模板验证历史徽章不会遮住降级提示；辅助回退测试还覆盖非字符串正文。问题与 uTools 待验收步骤见 [`docs/reviews/cc9cf62-对抗式审查.md`](docs/reviews/cc9cf62-对抗式审查.md)。这些隔离用例不等同于宿主验收。
+
 开源分发补充检查：
 
 - `dist/LICENSE`、`dist/NOTICE` 与根目录文件内容相同；`dist/THIRD_PARTY_NOTICES.txt` 包含实际打包的前端组件和 preload 依赖完整版权/许可文本；`dist/DICTIONARY_LICENSES.txt` 包含随包词库的数据许可全文与署名，缺少任一数据源许可文本时构建会失败。
