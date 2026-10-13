@@ -1,0 +1,137 @@
+import { describe, it } from 'node:test'
+import assert from 'node:assert/strict'
+import { readFileSync } from 'node:fs'
+import { reactive } from 'vue'
+import { runVueScript } from './helpers/vue-script-harness.mjs'
+
+const file = new URL('../src/Translate/components/SettingsPage.vue', import.meta.url)
+const source = readFileSync(file, 'utf8')
+
+async function fixture() {
+  const listeners = new Map()
+  const mounted = []
+  let observer
+  let writes = 0
+  const window = {
+    innerWidth: 1000,
+    addEventListener: (name, fn) => listeners.set(name, fn),
+    removeEventListener: (name, fn) => { if (listeners.get(name) === fn) listeners.delete(name) },
+  }
+  const app = await runVueScript(file, {
+    window,
+    bindings: {
+      useSettings: () => ({ settings: reactive({ failoverOrder: ['ai'] }), updateSetting() { writes++ }, toggleSetting() {} }),
+      onMounted: fn => mounted.push(fn),
+      ResizeObserver: class {
+        constructor(callback) { this.callback = callback; observer = this }
+        observe(element) { this.element = element }
+        disconnect() { this.disconnected = true }
+      },
+    },
+    expose: ['engineLayout', 'engineListWidth', 'engineListMaxWidth', 'resizingEngineList', 'syncEngineLayoutWidth', 'startEngineListResize', 'resizeEngineList', 'stopEngineListResize', 'onEngineSplitterKeydown'],
+  })
+  let width = 900
+  app.state.engineLayout.value = { getBoundingClientRect: () => ({ width }) }
+  app.state.syncEngineLayoutWidth()
+  const event = (x, extra = {}) => ({ clientX: x, pointerId: 7, button: 0, preventDefault() {}, ...extra })
+  return { ...app, window, listeners, event,
+    mountLayout() { mounted[0](); return observer },
+    get writes() { return writes },
+    setWidth(value) { width = value; app.state.syncEngineLayoutWidth() },
+  }
+}
+
+describe('引擎列表可调宽度', () => {
+  it('分隔条有键盘与可访问语义，状态位于名称外、P 序号左侧且不换行', () => {
+    assert.match(source, /role="separator"/)
+    assert.match(source, /aria-orientation="vertical"/)
+    assert.match(source, /@pointerdown="startEngineListResize"/)
+    assert.match(source, /@keydown="onEngineSplitterKeydown"/)
+    const card = source.slice(source.indexOf('<div class="engine-card-info">'), source.indexOf('<span class="engine-priority">'))
+    assert.match(card, /<\/div>\s*<div class="engine-card-meta">/, '状态不能嵌套在名称下方')
+    const metaStyle = source.match(/\.engine-card-meta\s*\{([^}]+)\}/)[1]
+    assert.match(metaStyle, /flex-wrap:\s*nowrap/)
+    assert.match(source, /\.engine-list-splitter\s*\{[^}]*display:\s*none/s)
+  })
+
+  it('指针拖动受左右宽度边界约束，结束后释放监听且不改排序设置', async () => {
+    const app = await fixture()
+    try {
+      const { state, event, listeners } = app
+      assert.equal(state.engineListWidth.value, 280)
+      state.startEngineListResize(event(300))
+      assert.equal(state.resizingEngineList.value, true)
+      assert.equal(listeners.size, 4)
+      state.resizeEngineList(event(350, { pointerId: 99 }))
+      assert.equal(state.engineListWidth.value, 280, '忽略其他指针')
+      state.resizeEngineList(event(350))
+      assert.equal(state.engineListWidth.value, 330)
+      state.resizeEngineList(event(9999))
+      assert.equal(state.engineListWidth.value, 420)
+      state.resizeEngineList(event(-9999))
+      assert.equal(state.engineListWidth.value, 240)
+      listeners.get('pointerup')(event(100))
+      assert.equal(state.resizingEngineList.value, false)
+      assert.equal(listeners.size, 0)
+      assert.equal(app.writes, 0, '调宽不持久化、不改顺序或引擎开关')
+    } finally { app.dispose() }
+  })
+
+  it('监听布局变化，切到窄窗时中止在途拖动，卸载断开观察器', async () => {
+    const app = await fixture()
+    const observer = app.mountLayout()
+    assert.equal(observer.element, app.state.engineLayout.value)
+    assert.equal(app.listeners.has('resize'), true)
+    app.state.startEngineListResize(app.event(300))
+    app.window.innerWidth = 640
+    observer.callback()
+    assert.equal(app.state.resizingEngineList.value, false)
+    assert.equal(app.listeners.has('pointermove'), false)
+    app.dispose()
+    assert.equal(observer.disconnected, true)
+    assert.equal(app.listeners.size, 0)
+  })
+
+  it('窗口收缩重新限制宽度，窄窗不拖动，取消/失焦/卸载清理监听', async () => {
+    const app = await fixture()
+    const { state, event, listeners } = app
+    state.startEngineListResize(event(300))
+    state.resizeEngineList(event(440))
+    app.setWidth(600)
+    assert.equal(state.engineListMaxWidth.value, 304)
+    assert.equal(state.engineListWidth.value, 304)
+    listeners.get('pointercancel')(event(440))
+    assert.equal(listeners.size, 0)
+    state.startEngineListResize(event(300, { button: 2 }))
+    assert.equal(listeners.size, 0)
+    state.startEngineListResize(event(300))
+    listeners.get('blur')()
+    assert.equal(listeners.size, 0)
+    app.window.innerWidth = 640
+    state.startEngineListResize(event(300))
+    assert.equal(listeners.size, 0)
+    app.window.innerWidth = 1000
+    state.startEngineListResize(event(300))
+    app.dispose()
+    assert.equal(listeners.size, 0)
+  })
+
+  it('键盘方向键调宽、Home/End 到边界，不处理无关键', async () => {
+    const app = await fixture()
+    try {
+      const { state } = app
+      let prevented = 0
+      const key = key => state.onEngineSplitterKeydown({ key, preventDefault() { prevented++ } })
+      key('ArrowRight')
+      assert.equal(state.engineListWidth.value, 290)
+      key('ArrowLeft')
+      assert.equal(state.engineListWidth.value, 280)
+      key('End')
+      assert.equal(state.engineListWidth.value, 420)
+      key('Home')
+      assert.equal(state.engineListWidth.value, 240)
+      key('Tab')
+      assert.equal(prevented, 4)
+    } finally { app.dispose() }
+  })
+})

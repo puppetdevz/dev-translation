@@ -140,6 +140,11 @@ describe('引擎开关接入回归', () => {
       onDragOver() {},
       onDrop() {},
       onDragEnd() {},
+      ENGINE_LIST_MIN_WIDTH: 240,
+      engineListMaxWidth: 420,
+      engineListWidth: 280,
+      startEngineListResize() {},
+      onEngineSplitterKeydown() {},
     })
 
     assert.equal((html.match(/engine-drag-handle/g) || []).length, 8, '八张卡片保留拖拽柄')

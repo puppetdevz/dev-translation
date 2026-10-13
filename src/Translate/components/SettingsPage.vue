@@ -425,6 +425,90 @@ const onDragEnd = () => {
   dragOverPos.value = null
 }
 
+// 仅调整当前设置页布局，不写引擎顺序/开关或持久化配置。
+const ENGINE_LIST_MIN_WIDTH = 240
+const ENGINE_LIST_MAX_WIDTH = 420
+const ENGINE_DETAIL_MIN_WIDTH = 280
+const ENGINE_SPLITTER_SPACE = 16
+const engineLayout = ref(null)
+const engineListWidth = ref(280)
+const engineLayoutWidth = ref(0)
+const resizingEngineList = ref(false)
+const engineListMaxWidth = computed(() => Math.max(ENGINE_LIST_MIN_WIDTH,
+  Math.min(ENGINE_LIST_MAX_WIDTH, Math.floor(engineLayoutWidth.value - ENGINE_DETAIL_MIN_WIDTH - ENGINE_SPLITTER_SPACE))))
+const clampEngineListWidth = (width) => Math.round(Math.max(ENGINE_LIST_MIN_WIDTH, Math.min(engineListMaxWidth.value, width)))
+let engineResizeStart = null
+let engineLayoutObserver = null
+
+const stopEngineListResize = (event) => {
+  if (event?.pointerId != null && engineResizeStart && event.pointerId !== engineResizeStart.pointerId) return
+  engineResizeStart = null
+  resizingEngineList.value = false
+  window.removeEventListener('pointermove', resizeEngineList)
+  window.removeEventListener('pointerup', stopEngineListResize)
+  window.removeEventListener('pointercancel', stopEngineListResize)
+  window.removeEventListener('blur', stopEngineListResize)
+}
+
+const syncEngineLayoutWidth = () => {
+  const width = engineLayout.value?.getBoundingClientRect().width || 0
+  if (!width || window.innerWidth <= 640) {
+    stopEngineListResize()
+    return
+  }
+  engineLayoutWidth.value = width
+  engineListWidth.value = clampEngineListWidth(engineListWidth.value)
+}
+
+const resizeEngineList = (event) => {
+  if (!engineResizeStart || event.pointerId !== engineResizeStart.pointerId) return
+  engineListWidth.value = clampEngineListWidth(engineResizeStart.width + event.clientX - engineResizeStart.x)
+}
+
+const startEngineListResize = (event) => {
+  if (event.button !== 0 || window.innerWidth <= 640) return
+  syncEngineLayoutWidth()
+  stopEngineListResize()
+  event.preventDefault()
+  engineResizeStart = { pointerId: event.pointerId, x: event.clientX, width: engineListWidth.value }
+  resizingEngineList.value = true
+  window.addEventListener('pointermove', resizeEngineList)
+  window.addEventListener('pointerup', stopEngineListResize)
+  window.addEventListener('pointercancel', stopEngineListResize)
+  window.addEventListener('blur', stopEngineListResize)
+}
+
+const onEngineSplitterKeydown = (event) => {
+  if (window.innerWidth <= 640) return
+  syncEngineLayoutWidth()
+  const widths = {
+    ArrowLeft: engineListWidth.value - 10,
+    ArrowRight: engineListWidth.value + 10,
+    Home: ENGINE_LIST_MIN_WIDTH,
+    End: engineListMaxWidth.value,
+  }
+  if (!Object.hasOwn(widths, event.key)) return
+  event.preventDefault()
+  engineListWidth.value = clampEngineListWidth(widths[event.key])
+}
+
+onMounted(() => {
+  syncEngineLayoutWidth()
+  if (typeof ResizeObserver !== 'undefined' && engineLayout.value) {
+    engineLayoutObserver = new ResizeObserver(syncEngineLayoutWidth)
+    engineLayoutObserver.observe(engineLayout.value)
+  }
+  window.addEventListener('resize', syncEngineLayoutWidth)
+})
+onUnmounted(() => {
+  stopEngineListResize()
+  engineLayoutObserver?.disconnect()
+  window.removeEventListener('resize', syncEngineLayoutWidth)
+})
+watch(activeCategory, (category) => {
+  if (category !== 'engine') stopEngineListResize()
+})
+
 const openDeeplSignup = () => {
   window.utools.shellOpenExternal('https://www.deepl.com/pro-api')
 }
@@ -1075,9 +1159,9 @@ const handleRecentError = () => {
             </div>
           </template>
         </div>
-        <div class="engine-layout">
+        <div ref="engineLayout" class="engine-layout" :class="{ 'is-resizing': resizingEngineList }" :style="{ '--engine-list-width': `${engineListWidth}px` }">
           <!-- 左列：引擎列表（拖拽调序 + 点击选中） -->
-          <div class="engine-list">
+          <div id="settings-engine-list" class="engine-list">
             <template v-for="(engine, index) in settings.failoverOrder" :key="engine">
               <div
                 v-if="engineMeta[engine]"
@@ -1102,18 +1186,34 @@ const handleRecentError = () => {
                 <span v-else class="brand-badge" :class="engineMeta[engine].brandClass">{{ engineMeta[engine].brand }}</span>
                 <div class="engine-card-info">
                   <div class="engine-card-title">
-                    <span class="engine-card-name">{{ engineMeta[engine].name }}</span>
+                    <span class="engine-card-name" :title="engineMeta[engine].name">{{ engineMeta[engine].name }}</span>
                   </div>
-                  <div class="engine-card-meta">
-                    <span v-if="mainEngine === engine" class="engine-primary-tag">主引擎</span>
-                    <span v-if="!isEngineEnabled(settings, engine)" class="engine-card-off">已关闭</span>
-                    <span v-if="!officialEngineConfigured(engine)" class="engine-card-unconfigured">未配置</span>
-                  </div>
+                </div>
+                <div class="engine-card-meta">
+                  <span v-if="mainEngine === engine" class="engine-primary-tag">主引擎</span>
+                  <span v-if="!isEngineEnabled(settings, engine)" class="engine-card-off">已关闭</span>
+                  <span v-if="!officialEngineConfigured(engine)" class="engine-card-unconfigured">未配置</span>
                 </div>
                 <span class="engine-priority">P{{ index + 1 }}</span>
               </div>
             </template>
           </div>
+
+          <div
+            class="engine-list-splitter"
+            role="separator"
+            tabindex="0"
+            aria-label="调整引擎列表宽度"
+            aria-orientation="vertical"
+            aria-controls="settings-engine-list"
+            :aria-valuemin="ENGINE_LIST_MIN_WIDTH"
+            :aria-valuemax="engineListMaxWidth"
+            :aria-valuenow="engineListWidth"
+            :aria-valuetext="`${engineListWidth} 像素`"
+            title="左右拖动调整列表宽度；方向键微调，Home / End 调至边界"
+            @pointerdown="startEngineListResize"
+            @keydown="onEngineSplitterKeydown"
+          ></div>
 
           <!-- 右列：选中引擎的具体配置（与分类侧栏独立） -->
           <div class="engine-config-area">
@@ -1749,13 +1849,50 @@ const handleRecentError = () => {
 /* Engine left-right layout — independent from category sidebar */
 .engine-layout {
   display: flex;
-  gap: 16px;
+  gap: 2px;
   align-items: flex-start;
   min-width: 0;
 }
 
+.engine-layout.is-resizing,
+.engine-layout.is-resizing * {
+  cursor: col-resize !important;
+  user-select: none;
+}
+
+.engine-list-splitter {
+  flex: 0 0 12px;
+  align-self: stretch;
+  position: relative;
+  cursor: col-resize;
+  touch-action: none;
+  border-radius: 6px;
+}
+
+.engine-list-splitter::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 5px;
+  width: 2px;
+  border-radius: 1px;
+  background: rgba(148, 163, 184, 0.35);
+}
+
+.engine-list-splitter:hover::before,
+.engine-list-splitter:focus-visible::before,
+.is-resizing .engine-list-splitter::before {
+  background: #667eea;
+}
+
+.engine-list-splitter:focus-visible {
+  outline: 1px solid #667eea;
+  outline-offset: 1px;
+}
+
 .engine-list {
-  width: 220px;
+  width: min(var(--engine-list-width, 280px), max(240px, calc(100% - 296px)));
   flex-shrink: 0;
   display: flex;
   flex-direction: column;
@@ -1771,7 +1908,7 @@ const handleRecentError = () => {
   border: 1px solid rgba(226, 232, 240, 0.6);
   border-radius: 10px;
   cursor: grab;
-  transition: all 0.2s;
+  transition: opacity 0.2s;
   user-select: none;
 }
 
@@ -1861,7 +1998,13 @@ const handleRecentError = () => {
   display: flex;
   align-items: center;
   gap: 5px;
-  flex-wrap: wrap;
+  flex-wrap: nowrap;
+  flex-shrink: 0;
+  white-space: nowrap;
+}
+
+.engine-card-meta:empty {
+  display: none;
 }
 
 .engine-card-name {
@@ -1967,7 +2110,7 @@ const handleRecentError = () => {
   color: var(--text-secondary, #64748b);
 }
 
-/* 故障转移优先级徽章：P1=主引擎，与 P2+ 样式一致 */
+/* 列表优先级徽章；主引擎由首个开启项决定，不固定为 P1。 */
 .engine-priority {
   font-size: 11px;
   font-weight: 700;
@@ -3414,6 +3557,16 @@ const handleRecentError = () => {
     color: #a5b4fc;
   }
 
+  .engine-list-splitter::before {
+    background: rgba(148, 163, 184, 0.45);
+  }
+
+  .engine-list-splitter:hover::before,
+  .engine-list-splitter:focus-visible::before,
+  .is-resizing .engine-list-splitter::before {
+    background: #a5b4fc;
+  }
+
   .engine-card {
     background: rgba(15, 23, 42, 0.6);
     border-color: rgba(51, 65, 85, 0.6);
@@ -3526,6 +3679,11 @@ const handleRecentError = () => {
 
   .engine-layout {
     flex-direction: column;
+    gap: 16px;
+  }
+
+  .engine-list-splitter {
+    display: none;
   }
 
   .engine-list {
@@ -3541,7 +3699,7 @@ const handleRecentError = () => {
 
   .engine-card {
     /* 允许真正换行而不是把八张卡片挤进一行；长名称在卡片内省略而不是溢出遮挡 */
-    flex: 1 1 132px;
+    flex: 1 1 240px;
     min-width: 0;
     padding: 10px 12px;
     gap: 6px;
