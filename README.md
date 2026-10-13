@@ -77,7 +77,7 @@
 ## 开发
 
 ```bash
-# 按锁文件安装依赖（开发与构建已验证 Node 26.7.0 / pnpm 12.6.0）
+# 按锁文件安装依赖（开发与构建已验证 Node 26.10.0 / pnpm 12.10.1）
 pnpm install --frozen-lockfile
 
 # 开发模式
@@ -120,7 +120,7 @@ Copyright (C) 2026 zhongyuming
 
 ## 版本历史
 
-当前版本：**1.5.0**。详见 [CHANGELOG.md](./CHANGELOG.md)。
+当前版本：**1.6.0**。详见 [CHANGELOG.md](./CHANGELOG.md)。
 
 项目仓库：[puppetdevz/dev-translation](https://github.com/puppetdevz/dev-translation)。
 
