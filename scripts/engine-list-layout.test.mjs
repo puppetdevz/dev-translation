@@ -1,7 +1,7 @@
 import { describe, it } from 'node:test'
 import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
-import { reactive } from 'vue'
+import { compile, nextTick, proxyRefs, reactive } from 'vue'
 import { runVueScript } from './helpers/vue-script-harness.mjs'
 
 const file = new URL('../src/Translate/components/SettingsPage.vue', import.meta.url)
@@ -12,6 +12,7 @@ async function fixture() {
   const mounted = []
   let observer
   let writes = 0
+  const settings = reactive({ failoverOrder: ['ai', 'thirdparty-ai', 'google', 'deepl', 'deeplx', 'baidu', 'aliyun', 'caiyun'] })
   const window = {
     innerWidth: 1000,
     addEventListener: (name, fn) => listeners.set(name, fn),
@@ -20,7 +21,7 @@ async function fixture() {
   const app = await runVueScript(file, {
     window,
     bindings: {
-      useSettings: () => ({ settings: reactive({ failoverOrder: ['ai'] }), updateSetting() { writes++ }, toggleSetting() {} }),
+      useSettings: () => ({ settings, updateSetting(key, value) { writes++; settings[key] = value; return true }, toggleSetting() {} }),
       onMounted: fn => mounted.push(fn),
       ResizeObserver: class {
         constructor(callback) { this.callback = callback; observer = this }
@@ -28,7 +29,13 @@ async function fixture() {
         disconnect() { this.disconnected = true }
       },
     },
-    expose: ['engineLayout', 'engineListWidth', 'engineListMaxWidth', 'resizingEngineList', 'syncEngineLayoutWidth', 'startEngineListResize', 'resizeEngineList', 'stopEngineListResize', 'onEngineSplitterKeydown'],
+    expose: [
+      'settings', 'engineMeta', 'mainEngine', 'selectedEngine', 'selectedEngineEnabled', 'activeCategory',
+      'selectEngine', 'toggleEngineEnabled', 'isEngineEnabled', 'officialEngineConfigured',
+      'dragIndex', 'dragOverIndex', 'dragOverPos', 'onDragStart', 'onDragOver', 'onDrop', 'onDragEnd',
+      'ENGINE_LIST_MIN_WIDTH', 'engineLayout', 'engineListWidth', 'engineListMaxWidth', 'resizingEngineList',
+      'syncEngineLayoutWidth', 'startEngineListResize', 'resizeEngineList', 'stopEngineListResize', 'onEngineSplitterKeydown',
+    ],
   })
   let width = 900
   app.state.engineLayout.value = { getBoundingClientRect: () => ({ width }) }
@@ -48,7 +55,7 @@ describe('引擎列表可调宽度', () => {
     assert.match(source, /@pointerdown="startEngineListResize"/)
     assert.match(source, /@keydown="onEngineSplitterKeydown"/)
     const card = source.slice(source.indexOf('<div class="engine-card-info">'), source.indexOf('<span class="engine-priority">'))
-    assert.match(card, /<\/div>\s*<div class="engine-card-meta">/, '状态不能嵌套在名称下方')
+    assert.match(card, /<\/div>\s*<div[^>]*class="engine-card-meta">/, '状态不能嵌套在名称下方')
     const metaStyle = source.match(/\.engine-card-meta\s*\{([^}]+)\}/)[1]
     assert.match(metaStyle, /flex-wrap:\s*nowrap/)
     assert.match(source, /\.engine-list-splitter\s*\{[^}]*display:\s*none/s)
@@ -114,6 +121,94 @@ describe('引擎列表可调宽度', () => {
     state.startEngineListResize(event(300))
     app.dispose()
     assert.equal(listeners.size, 0)
+  })
+
+  it('第二个指针按下不能抢走当前拖动的所有权', async () => {
+    const app = await fixture()
+    try {
+      const { state, event } = app
+      state.startEngineListResize(event(300))
+      state.startEngineListResize(event(310, { pointerId: 99 }))
+      state.resizeEngineList(event(350))
+      assert.equal(state.engineListWidth.value, 330, '原指针应继续控制拖动')
+      state.stopEngineListResize(event(350, { pointerId: 99 }))
+      assert.equal(state.resizingEngineList.value, true, '其他指针释放不能终止原指针拖动')
+      state.stopEngineListResize(event(350))
+      assert.equal(state.resizingEngineList.value, false)
+    } finally { app.dispose() }
+  })
+
+  it('容器在拖动中收缩后，下一次指针位移从当前可见宽度继续', async () => {
+    const app = await fixture()
+    try {
+      const { state, event } = app
+      state.onEngineSplitterKeydown({ key: 'End', preventDefault() {} })
+      state.startEngineListResize(event(500))
+      state.resizeEngineList(event(510))
+      app.setWidth(600)
+      assert.equal(state.engineListWidth.value, 304)
+      state.resizeEngineList(event(500))
+      assert.equal(state.engineListWidth.value, 294, '向左移动 10px 应立即缩小，而非困在旧锚点死区')
+      app.setWidth(900)
+      state.resizeEngineList(event(501))
+      assert.equal(state.engineListWidth.value, 295, '扩窗不能恢复过时起始宽度')
+      assert.equal(app.writes, 0)
+    } finally { app.dispose() }
+  })
+
+  it('切离引擎分类即停止拖动，返回后不恢复在途监听', async () => {
+    const app = await fixture()
+    try {
+      app.state.activeCategory.value = 'engine'
+      await nextTick()
+      app.state.startEngineListResize(app.event(300))
+      app.state.activeCategory.value = 'general'
+      await nextTick()
+      assert.equal(app.state.resizingEngineList.value, false)
+      assert.equal(app.listeners.has('pointermove'), false)
+      app.state.activeCategory.value = 'engine'
+      await nextTick()
+      assert.equal(app.state.resizingEngineList.value, false)
+    } finally { app.dispose() }
+  })
+
+  it('键盘可选择任一引擎，再由详情唯一开关启停，不修改顺序', async () => {
+    const app = await fixture()
+    try {
+      const template = source.slice(source.indexOf('<!-- 左列：引擎列表'), source.indexOf('<!-- 右列：选中引擎'))
+      const render = compile(template)
+      const cards = []
+      const visit = node => {
+        if (!node || typeof node !== 'object') return
+        if (node.props?.class?.includes('engine-card ') || node.props?.class === 'engine-card') cards.push(node)
+        if (Array.isArray(node.children)) node.children.forEach(visit)
+      }
+      visit(render(proxyRefs(app.state), []))
+      assert.equal(cards.length, 8)
+      const order = [...app.state.settings.failoverOrder]
+      for (const [index, card] of cards.entries()) {
+        assert.equal(Number(card.props.tabindex), 0, '每张引擎卡片必须可由 Tab 到达')
+        assert.equal(card.props.role, 'button')
+        assert.ok(card.props['aria-label'].includes(app.state.engineMeta[order[index]].name))
+        assert.equal(card.props['aria-describedby'], `settings-engine-status-${order[index]}`)
+        assert.equal(card.children.find(node => node.props?.class === 'engine-card-meta').props.id, card.props['aria-describedby'])
+        for (const key of ['Enter', ' ']) {
+          let prevented = false
+          const event = { key, preventDefault() { prevented = true } }
+          const handlers = card.props.onKeydown
+          for (const handler of Array.isArray(handlers) ? handlers : [handlers]) handler(event)
+          await nextTick()
+          assert.equal(prevented, true, 'Space 不得滚动面板')
+          assert.equal(app.state.selectedEngine.value, order[index])
+          assert.equal(app.writes, index, '选择只改变编辑焦点，不写配置')
+        }
+        app.state.toggleEngineEnabled(app.state.selectedEngine.value)
+        assert.equal(app.state.selectedEngineEnabled.value, false)
+      }
+      assert.deepEqual([...app.state.settings.failoverOrder], order)
+      assert.equal(app.writes, 8)
+      assert.match(source, /\.engine-card:focus-visible\s*\{/)
+    } finally { app.dispose() }
   })
 
   it('键盘方向键调宽、Home/End 到边界，不处理无关键', async () => {

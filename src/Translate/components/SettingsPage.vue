@@ -456,21 +456,28 @@ const syncEngineLayoutWidth = () => {
     stopEngineListResize()
     return
   }
+  const layoutChanged = engineLayoutWidth.value !== width
   engineLayoutWidth.value = width
   engineListWidth.value = clampEngineListWidth(engineListWidth.value)
+  // 容器变化后以当前可见宽度与最后指针位置重新锚定，避免旧起点造成死区/跳宽。
+  if (layoutChanged && engineResizeStart) {
+    engineResizeStart.width = engineListWidth.value
+    engineResizeStart.x = engineResizeStart.lastX
+  }
 }
 
 const resizeEngineList = (event) => {
   if (!engineResizeStart || event.pointerId !== engineResizeStart.pointerId) return
+  engineResizeStart.lastX = event.clientX
   engineListWidth.value = clampEngineListWidth(engineResizeStart.width + event.clientX - engineResizeStart.x)
 }
 
 const startEngineListResize = (event) => {
-  if (event.button !== 0 || window.innerWidth <= 640) return
+  if (engineResizeStart || event.button !== 0 || window.innerWidth <= 640) return
   syncEngineLayoutWidth()
   stopEngineListResize()
   event.preventDefault()
-  engineResizeStart = { pointerId: event.pointerId, x: event.clientX, width: engineListWidth.value }
+  engineResizeStart = { pointerId: event.pointerId, x: event.clientX, lastX: event.clientX, width: engineListWidth.value }
   resizingEngineList.value = true
   window.addEventListener('pointermove', resizeEngineList)
   window.addEventListener('pointerup', stopEngineListResize)
@@ -1166,6 +1173,11 @@ const handleRecentError = () => {
               <div
                 v-if="engineMeta[engine]"
                 class="engine-card"
+                role="button"
+                tabindex="0"
+                :aria-label="`${engineMeta[engine].name} 配置`"
+                :aria-describedby="`settings-engine-status-${engine}`"
+                :aria-pressed="selectedEngine === engine ? 'true' : 'false'"
                 :class="{
                   active: selectedEngine === engine,
                   'engine-disabled': !isEngineEnabled(settings, engine),
@@ -1180,6 +1192,8 @@ const handleRecentError = () => {
                 @drop.prevent="onDrop(index)"
                 @dragend="onDragEnd"
                 @click="selectEngine(engine)"
+                @keydown.enter.prevent="selectEngine(engine)"
+                @keydown.space.prevent="selectEngine(engine)"
               >
                 <span class="engine-drag-handle">⠿</span>
                 <span v-if="engineMeta[engine].icon" class="engine-card-icon">{{ engineMeta[engine].icon }}</span>
@@ -1189,7 +1203,7 @@ const handleRecentError = () => {
                     <span class="engine-card-name" :title="engineMeta[engine].name">{{ engineMeta[engine].name }}</span>
                   </div>
                 </div>
-                <div class="engine-card-meta">
+                <div :id="`settings-engine-status-${engine}`" class="engine-card-meta">
                   <span v-if="mainEngine === engine" class="engine-primary-tag">主引擎</span>
                   <span v-if="!isEngineEnabled(settings, engine)" class="engine-card-off">已关闭</span>
                   <span v-if="!officialEngineConfigured(engine)" class="engine-card-unconfigured">未配置</span>
@@ -1910,6 +1924,11 @@ const handleRecentError = () => {
   cursor: grab;
   transition: opacity 0.2s;
   user-select: none;
+}
+
+.engine-card:focus-visible {
+  outline: 1px solid #667eea;
+  outline-offset: 2px;
 }
 
 .engine-card:hover {
@@ -3565,6 +3584,10 @@ const handleRecentError = () => {
   .engine-list-splitter:focus-visible::before,
   .is-resizing .engine-list-splitter::before {
     background: #a5b4fc;
+  }
+
+  .engine-card:focus-visible {
+    outline-color: #a5b4fc;
   }
 
   .engine-card {
