@@ -34,14 +34,29 @@ const props = defineProps({
     default: () => ({
       showPhonetic: true,
       showDefinitions: true,
+      showPartOfSpeech: true,
       showExamples: true,
       showVariableNaming: true,
+      showAiNaming: false,
       showContextNote: true,
     })
-  }
+  },
+  /** 单词/词组分支的词典补全字段状态 */
+  dictionaryStatus: {
+    type: Object,
+    default: () => ({ phonetic: 'idle', definitions: 'idle' }),
+  },
+  /** AI 命名状态：两个分支共用同一协议 */
+  aiNamingStatus: { type: String, default: 'off' },
+  aiNamingWords: { type: Array, default: () => [] },
+  aiNamingMessage: { type: String, default: '' },
 })
 
-const emit = defineEmits(['retry'])
+const emit = defineEmits(['retry', 'retry-naming'])
+
+const handleRetryNaming = () => {
+  emit('retry-naming')
+}
 
 const { toastVisible, toastText, copyWithToast } = useCopyToast()
 
@@ -81,6 +96,11 @@ const handleRetry = () => {
           :originalText="originalText"
           :detectedLanguage="detectedLanguage"
           :settings="settings"
+          :dictionaryStatus="dictionaryStatus"
+          :aiNamingStatus="aiNamingStatus"
+          :aiNamingWords="aiNamingWords"
+          :aiNamingMessage="aiNamingMessage"
+          @retry-naming="handleRetryNaming"
         />
       </template>
 
@@ -96,6 +116,11 @@ const handleRetry = () => {
           <VariableNaming
             :englishText="detectedLanguage === 'zh' ? result.translation : originalText"
             :enabled="settings.showVariableNaming"
+            :aiEnabled="!!settings.showAiNaming"
+            :aiStatus="aiNamingStatus"
+            :aiWords="aiNamingWords"
+            :aiMessage="aiNamingMessage"
+            @retry="handleRetryNaming"
           />
           <div v-if="settings.showContextNote && result.contextNote" class="sentence-context">{{ result.contextNote }}</div>
         </div>

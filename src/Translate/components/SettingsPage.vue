@@ -709,24 +709,33 @@ const handleDeeplxUrlInput = (value) => {
   }
 }
 
+const POS_OUTPUT_ITEM = { key: 'showPartOfSpeech', label: '显示词性', desc: '显示 n./v./adj. 等词性标签；关闭只隐藏标签，释义含义不变' }
+const AI_NAMING_OUTPUT_ITEM = { key: 'showAiNaming', label: 'AI 命名', desc: '按用途生成一个语义名称；需已配置 AI 来源，开启后会额外联网发送本次输入与译文并消耗额度' }
+
 const aiOutputs = [
-  { key: 'showPhonetic', label: '显示音标', desc: 'AI 生成美式 IPA 音标' },
-  { key: 'showDefinitions', label: '显示释义', desc: 'AI 生成 3-5 条英文释义' },
-  { key: 'showExamples', label: '显示例句', desc: 'AI 生成 3-5 条英文例句' },
-  { key: 'showVariableNaming', label: '显示变量命名', desc: '基于翻译结果生成 5 种编程命名格式' },
+  { key: 'showPhonetic', label: '显示音标', desc: '美式 IPA 音标（AI 生成，缺失时由本地词库补全）' },
+  { key: 'showDefinitions', label: '显示释义', desc: '英译中显示中文释义，中译英显示英文释义，最多 3 条' },
+  POS_OUTPUT_ITEM,
+  { key: 'showExamples', label: '显示例句', desc: 'AI 生成英文例句（最多 2 条）' },
+  { key: 'showVariableNaming', label: '显示变量命名', desc: '常规命名：由英文词元生成 5 种命名格式' },
+  AI_NAMING_OUTPUT_ITEM,
   { key: 'showContextNote', label: '显示语境说明', desc: 'AI 补充单词使用场景说明' },
 ]
 
 const googleOutputs = [
-  { key: 'showPhonetic', label: '显示音标', desc: '词典查询获取音标' },
-  { key: 'showDefinitions', label: '显示释义', desc: '词典查询获取释义' },
-  { key: 'showVariableNaming', label: '显示变量命名', desc: '基于翻译结果生成 5 种编程命名格式' },
+  { key: 'showPhonetic', label: '显示音标', desc: '美式 IPA 音标（本地词库提供，在线词典音标不标注口音故不使用）' },
+  { key: 'showDefinitions', label: '显示释义', desc: '英译中显示中文释义，中译英显示英文释义，最多 3 条' },
+  POS_OUTPUT_ITEM,
+  { key: 'showVariableNaming', label: '显示变量命名', desc: '常规命名：由英文词元生成 5 种命名格式' },
+  AI_NAMING_OUTPUT_ITEM,
 ]
 
 const deeplOutputs = [
-  { key: 'showPhonetic', label: '显示音标', desc: '词典查询获取音标' },
-  { key: 'showDefinitions', label: '显示释义', desc: '词典查询获取释义' },
-  { key: 'showVariableNaming', label: '显示变量命名', desc: '基于翻译结果生成 5 种编程命名格式' },
+  { key: 'showPhonetic', label: '显示音标', desc: '美式 IPA 音标（本地词库提供，在线词典音标不标注口音故不使用）' },
+  { key: 'showDefinitions', label: '显示释义', desc: '英译中显示中文释义，中译英显示英文释义，最多 3 条' },
+  POS_OUTPUT_ITEM,
+  { key: 'showVariableNaming', label: '显示变量命名', desc: '常规命名：由英文词元生成 5 种命名格式' },
+  AI_NAMING_OUTPUT_ITEM,
 ]
 
 const currentOutputs = computed(() => {

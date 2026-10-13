@@ -21,12 +21,28 @@ import {
   safeLookupWord,
   engineDisplayName,
   runMainTextTranslation,
-  wordLookupTarget,
   canApplyDictionarySupplement,
+  safeLookupLocalDictionary,
+  dictionaryLookupTarget,
+  normalizeDictionaryKey,
+  waitWithBudget,
+  mergeDictionarySupplement,
+  hasUsablePhonetic,
+  hasUsableDefinitions,
+  pickLocalDefinitions,
+  DICTIONARY_BUDGET_MS,
   DICT_ENGINES,
   SKIP_REASON,
   PHASE,
 } from './utils/engineBridge.js'
+import {
+  AI_NAMING_STATUS,
+  AI_NAMING_TOTAL_BUDGET_MS,
+  exceedsAiNamingInputLimit,
+  filterAiNamingSources,
+  runAiNaming,
+} from './utils/aiNaming.js'
+import { buildAiNamingMessages } from './prompts/aiNaming.js'
 
 const props = defineProps({
   enterAction: {
@@ -55,6 +71,21 @@ let fallbackTimer = null
 const usedEngine = ref('')
 // 翻译请求令牌：每次翻译自增，结果回填前校验是否仍是最新请求，丢弃旧慢请求的覆盖
 let translateRequestId = 0
+
+// 词典补全字段状态：idle | loading | available | unavailable | hidden（按字段独立）
+const dictionaryStatus = ref({ phonetic: 'idle', definitions: 'idle' })
+// 词典补全版本：重新翻译、改输入/方向、清空或卸载都会让旧补全回填失效
+let dictionaryRequestVersion = 0
+
+// AI 命名状态：独立于主翻译与词典补全，默认关闭；仅在开启后按需请求
+const aiNamingStatus = ref('off')
+const aiNamingWords = ref([])
+const aiNamingMessage = ref('')
+let aiNamingVersion = 0
+// 最近一次成功翻译的快照：只有匹配当前输入/方向的成功译文才能补生成或重试命名
+let aiNamingSnapshot = null
+// 同一输入/方向/译文/配置下防止重复生成（开启事件与翻译成功事件防重）
+let aiNamingActiveKey = ''
 
 // 润色相关状态
 const isPolishing = ref(false)
@@ -116,6 +147,9 @@ const cancelDetection = () => {
 const handleLanguageToggle = () => {
   detectedLanguage.value = detectedLanguage.value === 'zh' ? 'en' : 'zh'
   isManualOverride.value = true
+  // 方向变化：旧资料补全与旧 AI 命名立即失效
+  resetDictionaryState()
+  clearAiNamingState()
 }
 
 // 右键重新自动识别
@@ -405,35 +439,238 @@ const translateWithEngine = async (engine, timeoutMs, settingsSnap, requestId) =
   }
 }
 
+const idleDictionaryStatus = (result, lang) => ({
+  phonetic: settings.showPhonetic
+    ? (hasUsablePhonetic(result && result.phonetic) ? 'available' : 'idle')
+    : 'hidden',
+  definitions: settings.showDefinitions
+    ? (hasUsableDefinitions(result && result.definitions, lang) ? 'available' : 'idle')
+    : 'hidden',
+})
+
+/**
+ * 词典资料补全（独立于主翻译与 AI 命名）：
+ * 主译文先展示 → 记录输入/方向/引擎/译文快照 → 本地词库补缺 → 必要时单词在线补缺
+ * → 校验请求与截止时间 → 字段级合并 → 更新字段状态。
+ * 整段补全从启动起最长 DICTIONARY_BUDGET_MS；到期保留已取得字段，其余转最终缺失。
+ */
 const supplementDictionary = async ({ engine, result, requestId, sourceText, lang, type }) => {
-  // AI 未按 JSON 返回时也可能只有译文；单词模式可用词典补足缺失的音标/释义。
-  if (!DICT_ENGINES[engine] && engine !== 'ai' && engine !== 'thirdparty-ai') return
-  if (result?.phonetic && Array.isArray(result.definitions) && result.definitions.length) return
-  const word = wordLookupTarget({
-    type,
-    lang,
-    sourceText,
-    translation: result && result.translation,
-  })
-  if (!word) return
-  const dict = await safeLookupWord(word)
-  if (!canApplyDictionarySupplement({
-    isCurrent: () => requestId === translateRequestId,
-    engine,
-    usedEngine: usedEngine.value,
-    translation: result && result.translation,
-    currentTranslation: translationResult.value && translationResult.value.translation,
-  })) return
-  translationResult.value = {
-    ...translationResult.value,
-    phonetic: translationResult.value.phonetic || dict.phonetic || '',
-    definitions: (translationResult.value.definitions && translationResult.value.definitions.length)
-      ? translationResult.value.definitions
-      : (dict.definitions || []),
-    examples: (translationResult.value.examples && translationResult.value.examples.length)
-      ? translationResult.value.examples
-      : (dict.examples || []),
+  const source = String(sourceText || '').trim()
+  const translation = (result && result.translation) || ''
+  const needPhonetic = !!settings.showPhonetic && !hasUsablePhonetic(result && result.phonetic)
+  const needDefinitions = !!settings.showDefinitions && !hasUsableDefinitions(result && result.definitions, lang)
+  const target = dictionaryLookupTarget({ type, lang, sourceText: source, translation })
+
+  // 全部资料栏目关闭、或没有可补全的字段/目标时不发起补全（也不为 AI 命名负责）
+  if ((!needPhonetic && !needDefinitions) || !target.target) {
+    dictionaryStatus.value = idleDictionaryStatus(result, lang)
+    return
   }
+
+  const myVersion = ++dictionaryRequestVersion
+  const deadline = Date.now() + DICTIONARY_BUDGET_MS
+  const isCurrent = () => myVersion === dictionaryRequestVersion
+    && canApplyDictionarySupplement({
+      isCurrent: () => true,
+      engine,
+      usedEngine: usedEngine.value,
+      translation,
+      currentTranslation: translationResult.value && translationResult.value.translation,
+      sourceText: source,
+      currentSourceText: inputText.value,
+      lang,
+      currentLang: detectedLanguage.value,
+    })
+  const isSettled = () => requestId !== translateRequestId || !isCurrent()
+
+  dictionaryStatus.value = {
+    phonetic: settings.showPhonetic ? (needPhonetic ? 'loading' : 'available') : 'hidden',
+    definitions: settings.showDefinitions ? (needDefinitions ? 'loading' : 'available') : 'hidden',
+  }
+
+  let localEntry = null
+  try {
+    localEntry = await safeLookupLocalDictionary(target.target)
+  } catch (e) {
+    localEntry = null
+  }
+  if (isSettled()) return
+
+  // 固定词组整组命中即视为有效资料来源；词组不拆词、也不走在线单词词典
+  const isLocalPhrase = !!(localEntry && localEntry.found && localEntry.kind === 'phrase')
+  // 仅当输入因长度阈值被误判为句子、且无句末标点、完整命中固定词条时才按词组展示；
+  // 不泛化为放开句子词典查询。
+  if (type === 'sentence' && isLocalPhrase
+    && !/[.!?;,\n。！？；，、]/.test(source)
+    && normalizeDictionaryKey(source) === localEntry.key) {
+    inputType.value = 'word'
+  }
+  const localDefinitions = pickLocalDefinitions(localEntry, lang)
+  const singleWordTarget = !/\s/.test(target.target)
+  const missingExamples = !(Array.isArray(result && result.examples) && result.examples.length)
+  const onlineAllowed = target.allowNetwork
+    && !target.phraseOnly
+    && !isLocalPhrase
+    && singleWordTarget
+    && ((needDefinitions && !localDefinitions.length) || missingExamples)
+
+  let onlineEntry = null
+  if (onlineAllowed) {
+    const remaining = deadline - Date.now()
+    if (remaining > 0) {
+      onlineEntry = await waitWithBudget(
+        safeLookupWord(target.target, undefined, remaining),
+        remaining,
+      )
+    }
+  }
+  if (isSettled()) return
+
+  const merged = mergeDictionarySupplement({ result, localEntry, onlineEntry, lang })
+  if (isSettled()) return
+  translationResult.value = { ...translationResult.value, ...merged.result }
+  dictionaryStatus.value = {
+    phonetic: settings.showPhonetic
+      ? (hasUsablePhonetic(merged.result.phonetic) ? 'available' : 'unavailable')
+      : 'hidden',
+    definitions: settings.showDefinitions
+      ? (hasUsableDefinitions(merged.result.definitions, lang) ? 'available' : 'unavailable')
+      : 'hidden',
+  }
+}
+
+/** 清空词典补全状态，并让进行中的补全失效。 */
+const resetDictionaryState = () => {
+  dictionaryRequestVersion++
+  dictionaryStatus.value = { phonetic: 'idle', definitions: 'idle' }
+}
+
+// ===== AI 命名（独立分支，默认关闭） =====
+
+const aiNamingSnapshotKey = (snapshot, settingsSnap) => JSON.stringify([
+  snapshot && snapshot.input,
+  snapshot && snapshot.lang,
+  snapshot && snapshot.translation,
+  snapshot && snapshot.engine,
+  settingsSnap.failoverOrder,
+  settingsSnap.thirdpartyAiGroups,
+])
+
+/** 只有与当前输入、方向、成功引擎和主译文完全匹配的译文才可用于命名。 */
+const matchesCurrentSnapshot = (snapshot) => {
+  if (!snapshot) return false
+  if (!translationResult.value || translationResult.value.translation !== snapshot.translation) return false
+  if (usedEngine.value !== snapshot.engine) return false
+  if (inputText.value.trim() !== snapshot.input) return false
+  if (detectedLanguage.value !== snapshot.lang) return false
+  return true
+}
+
+const clearAiNamingState = ({ invalidate = true } = {}) => {
+  if (invalidate) aiNamingVersion++
+  aiNamingStatus.value = 'off'
+  aiNamingWords.value = []
+  aiNamingMessage.value = ''
+  aiNamingActiveKey = ''
+}
+
+/**
+ * 生成 AI 命名：使用本次 settings 快照的 AI 来源顺序，独立 10 秒总预算。
+ * 关闭开关、输入/方向/译文/配置变化都会通过版本号让旧响应失效。
+ */
+const startAiNaming = async (snapshot) => {
+  if (!settings.showAiNaming || !snapshot) return
+  if (!matchesCurrentSnapshot(snapshot)) return
+
+  if (exceedsAiNamingInputLimit(snapshot.input)) {
+    aiNamingVersion++
+    aiNamingActiveKey = ''
+    aiNamingStatus.value = AI_NAMING_STATUS.TOO_LONG
+    aiNamingWords.value = []
+    aiNamingMessage.value = ''
+    return
+  }
+
+  const settingsSnap = {
+    failoverOrder: Array.isArray(settings.failoverOrder) ? [...settings.failoverOrder] : [],
+    thirdpartyAiGroups: snapshotThirdpartyAiGroups(settings),
+    thirdpartyAiFailoverTimeoutSeconds: settings.thirdpartyAiFailoverTimeoutSeconds,
+  }
+  const key = aiNamingSnapshotKey(snapshot, settingsSnap)
+  const settledStates = [
+    AI_NAMING_STATUS.LOADING,
+    AI_NAMING_STATUS.READY,
+    AI_NAMING_STATUS.NONE,
+    AI_NAMING_STATUS.FAILED,
+    AI_NAMING_STATUS.TIMEOUT,
+    AI_NAMING_STATUS.UNCONFIGURED,
+    AI_NAMING_STATUS.TOO_LONG,
+    AI_NAMING_STATUS.STALE,
+  ]
+  if (key === aiNamingActiveKey && settledStates.includes(aiNamingStatus.value)) return
+
+  const myVersion = ++aiNamingVersion
+  aiNamingActiveKey = key
+  aiNamingStatus.value = AI_NAMING_STATUS.LOADING
+  aiNamingWords.value = []
+  aiNamingMessage.value = ''
+
+  const sources = filterAiNamingSources(settingsSnap.failoverOrder)
+  const result = await runAiNaming({
+    sources,
+    settings: settingsSnap,
+    messages: buildAiNamingMessages({
+      text: snapshot.input,
+      lang: snapshot.lang,
+      translation: snapshot.translation,
+    }),
+    budgetMs: AI_NAMING_TOTAL_BUDGET_MS,
+    groupTimeoutMs: snapshotThirdpartyAiTimeoutMs(settingsSnap),
+    isCurrent: () => myVersion === aiNamingVersion && matchesCurrentSnapshot(snapshot) && settings.showAiNaming,
+    onAttempt: (payload) => {
+      if (payload.status === 'skipped') {
+        logger.warn(payload.source, 'AI 命名来源跳过', {
+          category: payload.category,
+          skipReason: payload.skipReason,
+          skipCategory: payload.skipCategory,
+          phase: PHASE.SKIP,
+          requestId: myVersion,
+          groupId: payload.groupId,
+        })
+        return
+      }
+      if (payload.status === 'failure') {
+        logger.error(payload.source, 'AI 命名调用失败', {
+          category: payload.category,
+          phase: payload.phase,
+          requestId: myVersion,
+          groupId: payload.groupId,
+        })
+        return
+      }
+      logger.info(payload.source, 'AI 命名成功', {
+        phase: PHASE.CALL,
+        requestId: myVersion,
+        groupId: payload.groupId,
+      })
+    },
+  })
+
+  if (myVersion !== aiNamingVersion) return
+  if (!matchesCurrentSnapshot(snapshot) || !settings.showAiNaming) return
+  aiNamingStatus.value = result.status
+  aiNamingWords.value = Array.isArray(result.words) ? result.words : []
+  aiNamingMessage.value = result.message || ''
+}
+
+/** 行内重试：只重新发起命名，不重新翻译、不重新查询词典；加载中禁止重复触发。 */
+const handleRetryNaming = () => {
+  const snapshot = aiNamingSnapshot
+  if (!snapshot || !settings.showAiNaming) return
+  if (aiNamingStatus.value === AI_NAMING_STATUS.LOADING) return
+  if (!matchesCurrentSnapshot(snapshot)) return
+  aiNamingActiveKey = ''
+  void startAiNaming(snapshot)
 }
 
 const translate = async () => {
@@ -447,6 +684,9 @@ const translate = async () => {
   translationResult.value = null
   fallbackNotice.value = ''
   usedEngine.value = ''
+  // 新翻译开始时让旧补全/旧命名失效并清空状态
+  resetDictionaryState()
+  clearAiNamingState()
   if (fallbackTimer) {
     clearTimeout(fallbackTimer)
     fallbackTimer = null
@@ -522,6 +762,13 @@ const translate = async () => {
       onSuccess: (engine, result, index) => {
         translationResult.value = result
         usedEngine.value = engine
+        const snapshot = {
+          input: inputText.value.trim(),
+          lang: detectedLanguage.value,
+          translation: result && result.translation,
+          engine,
+        }
+        aiNamingSnapshot = snapshot
         logger.info(engine, '翻译成功', { phase: PHASE.CALL, requestId: myRequestId })
         recordEngineResult(engine, true)
         if (index > 0) {
@@ -542,6 +789,8 @@ const translate = async () => {
           lang: detectedLanguage.value,
           type: inputType.value,
         })
+        // 词典补全与 AI 命名是两条独立异步分支，互不等待、互不影响
+        if (settings.showAiNaming) void startAiNaming(snapshot)
       },
     })
 
@@ -723,6 +972,10 @@ const handleClear = () => {
   polishedText.value = ''
   originalText.value = ''
   usedEngine.value = ''
+  // 清空后不复活旧资料/旧命名，也不保留空占位
+  resetDictionaryState()
+  clearAiNamingState()
+  aiNamingSnapshot = null
 }
 
 // 重试
@@ -750,8 +1003,51 @@ watch(inputText, (newValue) => {
     polishedText.value = ''
     originalText.value = ''
     usedEngine.value = ''
+    resetDictionaryState()
+    clearAiNamingState()
+    aiNamingSnapshot = null
   }
 })
+
+// 输入变化：旧资料补全与旧 AI 命名失效（不在输入过程中实时请求命名）
+watch(inputText, () => {
+  resetDictionaryState()
+  clearAiNamingState()
+})
+
+// AI 命名开关：关闭即失效并清除；由关闭变开启且当前输入仍有匹配的成功译文时补生成一次
+watch(() => settings.showAiNaming, (enabled) => {
+  if (!enabled) {
+    clearAiNamingState()
+    return
+  }
+  if (aiNamingSnapshot && matchesCurrentSnapshot(aiNamingSnapshot)) {
+    aiNamingActiveKey = ''
+    void startAiNaming(aiNamingSnapshot)
+  }
+})
+
+// AI 来源顺序/组配置变化：旧命名失效但不自动重发，保留可重试入口
+watch(
+  () => [
+    (settings.failoverOrder || []).join(','),
+    JSON.stringify(snapshotThirdpartyAiGroups(settings)),
+    settings.thirdpartyAiFailoverTimeoutSeconds,
+  ].join('|'),
+  () => {
+    aiNamingVersion++
+    aiNamingActiveKey = ''
+    if (!settings.showAiNaming) return
+    if (aiNamingStatus.value === 'off') return
+    aiNamingWords.value = []
+    aiNamingMessage.value = ''
+    if (aiNamingSnapshot && matchesCurrentSnapshot(aiNamingSnapshot)) {
+      aiNamingStatus.value = AI_NAMING_STATUS.STALE
+    } else {
+      aiNamingStatus.value = 'off'
+    }
+  },
+)
 
 // 处理文本选择进入
 watch(() => props.enterAction, (action) => {
@@ -769,6 +1065,8 @@ onUnmounted(() => {
     fallbackTimer = null
   }
   translateRequestId++ // 让任何 inflight 翻译完成后丢弃结果
+  dictionaryRequestVersion++ // 让 inflight 词典补全丢弃回填
+  aiNamingVersion++ // 让 inflight AI 命名丢弃回填
 })
 </script>
 
@@ -807,7 +1105,12 @@ onUnmounted(() => {
           :originalText="inputText"
           :detectedLanguage="detectedLanguage"
           :settings="settings"
+          :dictionaryStatus="dictionaryStatus"
+          :aiNamingStatus="aiNamingStatus"
+          :aiNamingWords="aiNamingWords"
+          :aiNamingMessage="aiNamingMessage"
           @retry="handleRetry"
+          @retry-naming="handleRetryNaming"
         />
       </div>
     </div>

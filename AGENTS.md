@@ -15,18 +15,22 @@ pnpm build  # 构建到 dist/；会把 google-translate-api-x 解引用复制进
 
 ## 架构要点（不看代码容易猜错的部分）
 
-- **所有联网翻译引擎都在 `public/preload/services.js`**（Node 上下文，绕过渲染进程 CORS 限制），通过 `window.services.*` 暴露：`googleTranslate`（三源分时切源 + 可选无认证 HTTP(S) CONNECT 代理及直连回退 + 24h LRU 缓存 + inflight 去重；代理实现见 `public/preload/googleTransport.js`）、`deeplTranslate`、`deeplxTranslate`、`baiduTranslate`、`aliyunTranslate`、`caiyunTranslate`（实现见 `officialEngines.js`，仅官方 HTTPS）、`requestThirdpartyAI`、`fetchThirdpartyModels`、`lookupWord`（dictionaryapi.dev 词典）。只有 uTools AI 在渲染进程直接调 `window.utools.ai`。**新增网络请求一律加到 preload，不要在组件里 fetch。** `google-translate-api-x` 为可选源，顶层 `require` 失败不得阻断 `window.services` 赋值。Google 专用代理不得用于其他引擎或词典。
+- **所有联网翻译引擎都在 `public/preload/services.js`**（Node 上下文，绕过渲染进程 CORS 限制），通过 `window.services.*` 暴露：`googleTranslate`（三源分时切源 + 可选无认证 HTTP(S) CONNECT 代理及直连回退 + 24h LRU 缓存 + inflight 去重；代理实现见 `public/preload/googleTransport.js`）、`deeplTranslate`、`deeplxTranslate`、`baiduTranslate`、`aliyunTranslate`、`caiyunTranslate`（实现见 `officialEngines.js`，仅官方 HTTPS）、`requestThirdpartyAI`、`fetchThirdpartyModels`、`lookupWord`（dictionaryapi.dev 词典，可选第二参为剩余预算毫秒）、`lookupLocalDictionary`/`localDictionaryInfo`（本地打包词库，实现见 `public/preload/localDictionary.js`）。只有 uTools AI 在渲染进程直接调 `window.utools.ai`。**新增网络请求一律加到 preload，不要在组件里 fetch。** `google-translate-api-x` 为可选源，顶层 `require` 失败不得阻断 `window.services` 赋值；本地词库读取失败同样只降级为未命中。Google 专用代理不得用于其他引擎或词典。
+- **本地双语词库**：`public/preload/dictionary/`（`manifest.json`、`shards/*.json`、`SOURCES.json`、`COVERAGE.md`、`LICENSES/`）由 `scripts/importDictionary.mjs` 在开发阶段生成，随 `public → dist` 打包。约 5000 单词 + 500 固定词组；音标只取来源明确标注美式（ipa-dict `en_US` / en.wiktionary `a=US|GA|GenAm`），在线词典响应不含地区语义因此其音标一律丢弃。**不要手工编辑 `dictionary/` 下的数据文件**，改动需经导入脚本与覆盖率报告；原始下载缓存在 `.dictionary-cache/`（已 gitignore，不进包）。
 - 项目采用 `GPL-3.0-only`，版权署名 `zhongyuming`。`scripts/distributionLicenses.mjs` 在构建时生成 `dist/LICENSE`、`dist/NOTICE` 与 `dist/THIRD_PARTY_NOTICES.txt`，保留实际打包组件及 preload 依赖的完整第三方许可文本，缺许可文本时阻止构建。分发还须提供对应完整源码；历史隐私重写须明确授权；本地定向清理已执行但远程未更新，未经另行授权不得强推或 fetch/pull 重新引入旧历史。
 - preload 是 CommonJS（`public/preload/package.json` 设了 `type: commonjs`，根包是 ESM）——保持 `require()`，勿改成 import。打包产物必须含 `dist/preload/node_modules/google-translate-api-x` 的**真实文件**（禁止残留 pnpm symlink）。
+- 资料补全编排在 `src/Translate/index.vue:supplementDictionary`：主译文先展示，整段词典补全自带 5 秒总预算（`DICTIONARY_BUDGET_MS`），只补缺失字段（`mergeDictionarySupplement`），英译中只认中文释义、中译英只认英文释义，词组整组命中才补，句子不放开词典查询（仅允许完整词组词条修正被长度阈值误判的输入）。补全不占用 `engineResponseTimeoutSeconds`、不参与引擎统计。
+- **AI 命名**在 `src/Translate/utils/aiNaming.js` + `src/Translate/prompts/aiNaming.js`：默认关闭（`showAiNaming`），按 `failoverOrder` 过滤出 `ai`/`thirdparty-ai` 保持相对顺序，每轮独立 10 秒总预算（组单次 `min(组时限, 剩余预算)`），严格校验 `{shouldName, words}`，同一组词元由 `utils/variableNaming.js` 本地生成 5 种格式；与主翻译、词典补全完全隔离，不复用翻译提示词或 `parseResult`。命名区两行（常规/AI）由 `VariableNaming.vue` 独立控制。
 - 引擎调度在 `src/Translate/utils/engineBridge.js`：未配置/缺方法为 `skipped`（不计成功率），真实调用失败才计 `failure`；524 立即回退下一引擎。每个已调用引擎受 `engineResponseTimeoutSeconds`（默认 5 秒，范围 1–60）约束，超时记为 `timeout` 失败并尝试下一引擎。自定义 AI 组链在 `utils/thirdpartyAiGroups.js`，使用独立的 `thirdpartyAiFailoverTimeoutSeconds`，**不能**被一级时限截断整条组链。词典查询失败不得推翻已成功主译文，也不占用该时限。
 - 路由：`src/router.js`（hash 模式），`/` 重定向到 `/translate`，另有 `/settings`。`App.vue` 监听 `utools.onPluginEnter`，用 `action.code` 作为路由名 push。新增功能 = plugin.json 加 feature（code）+ router 加同名路由。
 - 引擎故障转移：`src/Translate/index.vue` 按 `settings.failoverOrder` 顺序逐个尝试，**首位是主引擎**。合法引擎标识见 `utils/storage.js` 的 `KNOWN_ENGINES`（ai / thirdparty-ai / google / deepl / deeplx / baidu / aliyun / caiyun）。
-- 设置持久化：单个 dbStorage key `dev-translation-settings`，经 `utils/storage.js` + `utils/useSettings.js`（模块级 reactive 单例，跨组件共享）。`loadSettings` 内含旧配置迁移逻辑（failoverOrder 白名单过滤、deeplMode→deepl/deeplx 拆分、engineResponseTimeoutSeconds 规范化到 1–60 整数、旧单套 `thirdpartyAiUrl/Key/Model` → `thirdpartyAiGroups` 首组；空数组是合法零组，不得自动补回；Google 代理非法/空地址/含凭据时不得作为有效启用），改动需谨慎；新增设置字段只需加 `DEFAULT_SETTINGS`。
+- 设置持久化：单个 dbStorage key `dev-translation-settings`，经 `utils/storage.js` + `utils/useSettings.js`（模块级 reactive 单例，跨组件共享）。`loadSettings` 内含旧配置迁移逻辑（failoverOrder 白名单过滤、deeplMode→deepl/deeplx 拆分、engineResponseTimeoutSeconds 规范化到 1–60 整数、旧单套 `thirdpartyAiUrl/Key/Model` → `thirdpartyAiGroups` 首组；空数组是合法零组，不得自动补回；Google 代理非法/空地址/含凭据时不得作为有效启用），改动需谨慎；新增设置字段加进 `DEFAULT_SETTINGS` 与 `BOOLEAN_SETTING_DEFAULTS`（显示类布尔项，旧配置缺字段补默认、已保存的 `false` 不得重置：`showPartOfSpeech` 默认 `true`、`showAiNaming` 默认 `false`）。
 - AI 提示词集中在 `src/Translate/prompts/`（中译英 / 英译中 / 润色，index.js 统一导出）。AI 返回的 JSON 需多层容错解析（直接 parse → 提取 markdown 代码块 → 提取花括号）。
 - 日志与统计：`utils/logger.js` + `utils/safeLog.js`（最少元数据白名单，含 Google 来源/路径枚举，读取时清理旧 detail；不记录原文、URL、代理地址），`utils/engineStats.js`（成功/失败/跳过；跳过不进 total/recent；Google 一级调用最多结算一次）。
 
 ## 陷阱
 
+- `scripts/distributionLicenses.mjs` 会在构建时显式收录 `public/preload/dictionary/` 的数据许可并生成 `dist/DICTIONARY_LICENSES.txt`；缺任一数据源许可文本时构建失败，勿绕过。
 - `src/Settings/index.vue`、`src/Translate/components/SettingsPanel.vue`、`KeyboardShortcuts.vue` 是**无引用的遗留文件**，勿当作活代码改。当前设置页是 `Translate/components/SettingsPage.vue`，分「常规 / 引擎 / 高级」三类（宽屏侧栏、窄屏顶部标签），分类选择不持久化；输出开关在常规且仍由主引擎（`failoverOrder[0]`）决定，不是引擎页当前选中项。
 - 根目录 `google-translate-endpoints.mjs` 是调研参考实现，不参与构建；运行时 Google 翻译逻辑在 preload。
 - `pnpm-workspace.yaml` 仅有 `allowBuilds: esbuild`（允许 esbuild 的安装期构建脚本），勿删。
@@ -44,4 +48,5 @@ pnpm build  # 构建到 dist/；会把 google-translate-api-x 解引用复制进
 ## 参考文档
 
 - `README.md` — 功能与使用说明；`CHANGELOG.md` — 版本历史；`TESTING.md` — 手动测试清单
+- `docs/2026-1013-1434_翻译音标释义与AI变量命名优化.md` — 本次需求与方案；`docs/2026-1013-1434-翻译音标释义与AI变量命名优化-实施与验收.md` — 实施说明、数据关卡证据、异常模拟片段与 AC-001～AC-027 手动验收步骤
 - `docs/superpowers/{plans,specs}/` — 历史设计稿（Google 翻译接入、设置页重构），仅背景参考

@@ -36,3 +36,5 @@ dist-ssr
 id_rsa
 id_ed25519
 .playwright-mcp/
+# 词库导入用的开发期原始数据缓存（不参与构建与分发）
+.dictionary-cache/

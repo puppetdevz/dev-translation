@@ -40,6 +40,8 @@ function delay(ms) {
 }
 
 const METHODS = [
+  'lookupLocalDictionary',
+  'localDictionaryInfo',
   'googleTranslate',
   'deeplTranslate',
   'deeplxTranslate',
@@ -391,7 +393,8 @@ describe('翻译 HTTP 超时取消与非翻译接口时限', () => {
     assert.equal(testApi.LOOKUP_TIMEOUT_MS, 5000)
     assert.equal(services.requestThirdpartyAI.length, 4)
     assert.equal(services.fetchThirdpartyModels.length, 2)
-    assert.equal(services.lookupWord.length, 1)
+    // lookupWord 现在接收可选的剩余预算参数（(word, timeoutMs)），由补全编排传入剩余时限
+    assert.equal(services.lookupWord.length, 2)
   })
 })
 

@@ -56,9 +56,11 @@ const ALLOWED_SKIP_REASON = {
 const ALLOWED_ENGINES = new Set([
   'system', 'ai', 'thirdparty-ai', 'google', 'deepl', 'deeplx', 'baidu', 'aliyun', 'caiyun',
 ])
+// 固定字面量消息：不含原文、译文、URL、凭据或模型返回内容
 const SAFE_MESSAGES = new Set([
   '翻译成功', '翻译服务未加载', '翻译流程异常', '所有引擎均失败',
   'AI 语言检测失败', '文本润色失败',
+  'AI 命名成功', 'AI 命名调用失败', 'AI 命名来源跳过',
 ])
 
 function categoryFallbackMessage(category, statusCode) {

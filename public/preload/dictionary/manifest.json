@@ -1,0 +1,112 @@
+{
+  "version": "2026-10-13",
+  "generatedAt": "2026-10-13T09:01:30.958Z",
+  "lookup": {
+    "normalization": "trim + 小写 + 合并空白；另外尝试连字符/空格互换变体（仅当对应词条确实存在）",
+    "kinds": {
+      "wd": "单词",
+      "ph": "固定词组"
+    },
+    "region": "p.r=US 表示来源已明确标注美式读音；无该字段即不展示音标",
+    "definitions": "zh=中文释义（英译中方向），en=英文解释性释义（中译英方向），最多 3 条"
+  },
+  "counts": {
+    "words": 5000,
+    "phrases": 500,
+    "entries": 5500
+  },
+  "coverage": {
+    "words": {
+      "total": 5000,
+      "withUsIpa": 4957,
+      "withChinese": 5000,
+      "withEnglish": 4402,
+      "withChineseAndUsIpa": 4957,
+      "withAllThree": 4379
+    },
+    "phrases": {
+      "total": 500,
+      "withUsIpa": 500,
+      "withChinese": 220,
+      "withEnglish": 498,
+      "withChineseAndUsIpa": 220,
+      "withAllThree": 218
+    }
+  },
+  "shards": [
+    "a.json",
+    "b.json",
+    "c.json",
+    "d.json",
+    "e.json",
+    "f.json",
+    "g.json",
+    "h.json",
+    "i.json",
+    "j.json",
+    "k.json",
+    "l.json",
+    "m.json",
+    "n.json",
+    "o.json",
+    "p.json",
+    "q.json",
+    "r.json",
+    "s.json",
+    "t.json",
+    "u.json",
+    "v.json",
+    "w.json",
+    "y.json",
+    "z.json"
+  ],
+  "sources": [
+    {
+      "id": "wikipedia-word-frequency",
+      "name": "Wikipedia word frequency (enwiki 2023-04-13)",
+      "url": "https://raw.githubusercontent.com/IlyaSemenov/wikipedia-word-frequency/master/results/enwiki-2023-04-13.txt",
+      "repo": "https://github.com/IlyaSemenov/wikipedia-word-frequency",
+      "license": "MIT",
+      "licenseFile": "LICENSES/wikipedia-word-frequency-MIT.txt",
+      "usage": "常用性依据：为单词候选排序、为固定词组按组成词词频排序（词组常用性代理指标）"
+    },
+    {
+      "id": "ipa-dict-en-us",
+      "name": "ipa-dict en_US (基于 cmudict-ipa / CMUdict)",
+      "url": "https://raw.githubusercontent.com/open-dict-data/ipa-dict/master/data/en_US.txt",
+      "repo": "https://github.com/open-dict-data/ipa-dict",
+      "license": "MIT",
+      "licenseFile": "LICENSES/ipa-dict-MIT.txt",
+      "usage": "单词的美式 IPA（唯一来源，不做口音映射）",
+      "region": "US",
+      "regionEvidence": "数据文件名与项目说明明确为 English (US)，非按 IPA 字符形状推断"
+    },
+    {
+      "id": "open-english-wordnet-2025",
+      "name": "Open English WordNet 2025 edition",
+      "url": "https://github.com/globalwordnet/english-wordnet/releases/download/2025-edition/english-wordnet-2025-json.zip",
+      "repo": "https://github.com/globalwordnet/english-wordnet",
+      "license": "CC BY 4.0",
+      "licenseFile": "LICENSES/open-english-wordnet-CC-BY-4.0.txt",
+      "usage": "中译英方向的英文解释性释义；词组候选池（WordNet 词条身份）"
+    },
+    {
+      "id": "en-wiktionary",
+      "name": "English Wiktionary（通过 MediaWiki API 按词条读取）",
+      "url": "https://en.wiktionary.org/w/api.php",
+      "repo": "https://en.wiktionary.org/",
+      "license": "CC BY-SA 4.0",
+      "licenseFile": "LICENSES/wiktionary-CC-BY-SA-4.0.txt",
+      "usage": "固定词组的美式 IPA（仅采用 GA/US/GenAm 等明确地区标注）与英文释义"
+    },
+    {
+      "id": "zh-wiktionary",
+      "name": "Chinese Wiktionary（通过 MediaWiki API 按词条读取）",
+      "url": "https://zh.wiktionary.org/w/api.php",
+      "repo": "https://zh.wiktionary.org/",
+      "license": "CC BY-SA 4.0",
+      "licenseFile": "LICENSES/wiktionary-CC-BY-SA-4.0.txt",
+      "usage": "英译中方向的中文释义（含词性），中文来源直接提供中文义项"
+    }
+  ]
+}

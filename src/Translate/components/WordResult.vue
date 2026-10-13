@@ -21,12 +21,25 @@ const props = defineProps({
     default: () => ({
       showPhonetic: true,
       showDefinitions: true,
+      showPartOfSpeech: true,
       showExamples: true,
       showVariableNaming: true,
+      showAiNaming: false,
       showContextNote: true,
     })
-  }
+  },
+  /** 词典补全字段状态：idle | loading | available | unavailable | hidden */
+  dictionaryStatus: {
+    type: Object,
+    default: () => ({ phonetic: 'idle', definitions: 'idle' }),
+  },
+  /** AI 命名状态与结果（独立于常规命名行） */
+  aiNamingStatus: { type: String, default: 'off' },
+  aiNamingWords: { type: Array, default: () => [] },
+  aiNamingMessage: { type: String, default: '' },
 })
+
+const emit = defineEmits(['retry-naming'])
 
 const { toastVisible, toastText, copyWithToast } = useCopyToast()
 
@@ -102,6 +115,29 @@ const formattedDefinitions = computed(() => {
     exampleTranslation: ''
   }))
 })
+
+// 音标显示内容：真实音标 > 补全中 > 暂无音标；关闭音标开关时整体隐藏
+const phoneticDisplay = computed(() => {
+  if (props.result.phonetic) return { text: props.result.phonetic, placeholder: false }
+  const state = props.dictionaryStatus && props.dictionaryStatus.phonetic
+  if (state === 'loading') return { text: '音标补全中…', placeholder: true }
+  if (state === 'unavailable') return { text: '暂无音标', placeholder: true }
+  return null
+})
+
+// 释义缺失/加载提示；关闭释义开关时整块（含词性）隐藏，不出现「暂无词性」
+const definitionsPlaceholder = computed(() => {
+  if (!props.settings.showDefinitions) return ''
+  if (formattedDefinitions.value.length) return ''
+  const state = props.dictionaryStatus && props.dictionaryStatus.definitions
+  if (state === 'loading') return '释义补全中…'
+  if (state === 'unavailable') return '暂无释义'
+  return ''
+})
+
+const handleRetryNaming = () => {
+  emit('retry-naming')
+}
 </script>
 
 <template>
@@ -110,15 +146,20 @@ const formattedDefinitions = computed(() => {
     <div class="word-header">
       <div class="word-info">
         <h2 class="word-text" @click="copyWithToast(result.translation)">{{ result.translation }}</h2>
-        <span v-if="settings.showPhonetic && result.phonetic" class="phonetic" :class="{ speaking: isSpeaking }" @click="speakPhonetic">{{ result.phonetic }}</span>
+        <span
+          v-if="settings.showPhonetic && phoneticDisplay"
+          class="phonetic"
+          :class="{ speaking: isSpeaking, placeholder: phoneticDisplay.placeholder }"
+          @click="phoneticDisplay.placeholder ? null : speakPhonetic()"
+        >{{ phoneticDisplay.text }}</span>
       </div>
     </div>
 
     <!-- 释义列表 -->
-    <div v-if="settings.showDefinitions && formattedDefinitions.length > 0" class="definitions-section">
+    <div v-if="settings.showDefinitions" class="definitions-section">
       <div v-for="(def, index) in formattedDefinitions" :key="index" class="definition-item">
         <div class="definition-header">
-          <span v-if="def.pos" class="pos-tag">{{ def.pos }}</span>
+          <span v-if="settings.showPartOfSpeech && def.pos" class="pos-tag">{{ def.pos }}</span>
           <span class="meaning">{{ def.meaning }}</span>
         </div>
         <div v-if="settings.showExamples && def.example" class="example-row">
@@ -128,10 +169,19 @@ const formattedDefinitions = computed(() => {
           </span>
         </div>
       </div>
+      <div v-if="definitionsPlaceholder" class="definition-placeholder">{{ definitionsPlaceholder }}</div>
     </div>
 
-    <!-- 变量命名样式 -->
-    <VariableNaming :englishText="getEnglishSource()" :enabled="settings.showVariableNaming" />
+    <!-- 变量命名：常规行与 AI 行各自独立 -->
+    <VariableNaming
+      :englishText="getEnglishSource()"
+      :enabled="settings.showVariableNaming"
+      :aiEnabled="!!settings.showAiNaming"
+      :aiStatus="aiNamingStatus"
+      :aiWords="aiNamingWords"
+      :aiMessage="aiNamingMessage"
+      @retry="handleRetryNaming"
+    />
 
     <!-- 语境说明 -->
     <div v-if="settings.showContextNote && result.contextNote" class="context-note">
@@ -198,6 +248,24 @@ const formattedDefinitions = computed(() => {
 
 .phonetic:hover {
   opacity: 0.7;
+}
+
+.phonetic.placeholder {
+  color: var(--text-secondary, #94a3b8);
+  font-weight: 500;
+  cursor: default;
+}
+
+.phonetic.placeholder:hover {
+  opacity: 1;
+}
+
+.definition-placeholder {
+  padding: 8px 10px;
+  font-size: 12px;
+  color: var(--text-secondary, #94a3b8);
+  border: 1px dashed rgba(148, 163, 184, 0.4);
+  border-radius: 10px;
 }
 
 .phonetic.speaking {
@@ -396,7 +464,25 @@ const formattedDefinitions = computed(() => {
     opacity: 0.6;
   }
 
-  .phonetic.speaking {
+  .phonetic.placeholder {
+  color: var(--text-secondary, #94a3b8);
+  font-weight: 500;
+  cursor: default;
+}
+
+.phonetic.placeholder:hover {
+  opacity: 1;
+}
+
+.definition-placeholder {
+  padding: 8px 10px;
+  font-size: 12px;
+  color: var(--text-secondary, #94a3b8);
+  border: 1px dashed rgba(148, 163, 184, 0.4);
+  border-radius: 10px;
+}
+
+.phonetic.speaking {
     color: #c084fc;
     text-decoration-color: rgba(192, 132, 252, 0.4);
   }

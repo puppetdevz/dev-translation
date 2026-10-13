@@ -130,8 +130,10 @@ function cloneSettings(settings) {
 export const DEFAULT_SETTINGS = {
   showPhonetic: true,           // 显示音标
   showDefinitions: true,        // 显示释义
+  showPartOfSpeech: true,       // 显示词性（新增；关闭时仅隐藏 n./v./adj. 等标签，释义含义不变）
   showExamples: true,           // 显示例句
-  showVariableNaming: true,     // 显示变量命名样式
+  showVariableNaming: true,     // 显示变量命名样式（只控制常规命名行）
+  showAiNaming: false,          // AI 命名（新增；默认关闭，独立于常规命名，依赖已有 AI 来源并会额外联网消耗额度）
   showContextNote: true,        // 显示上下文说明
   detectionStrategy: 'regex',   // 语言检测策略: 'regex' | 'ai'
   translationEngine: 'ai',     // 主翻译引擎（兼容旧版本，实际主引擎由 failoverOrder[0] 决定）
@@ -153,6 +155,31 @@ export const DEFAULT_SETTINGS = {
   aliyunAccessKeySecret: '',        // 阿里云 AccessKey Secret
   caiyunToken: '',                  // 彩云开放平台 API Token
 }
+
+/** 布尔型显示设置：仅接受真正的布尔值，其他类型回退默认值。 */
+export const BOOLEAN_SETTING_DEFAULTS = {
+  showPhonetic: DEFAULT_SETTINGS.showPhonetic,
+  showDefinitions: DEFAULT_SETTINGS.showDefinitions,
+  showPartOfSpeech: DEFAULT_SETTINGS.showPartOfSpeech,
+  showExamples: DEFAULT_SETTINGS.showExamples,
+  showVariableNaming: DEFAULT_SETTINGS.showVariableNaming,
+  showAiNaming: DEFAULT_SETTINGS.showAiNaming,
+  showContextNote: DEFAULT_SETTINGS.showContextNote,
+  googleProxyEnabled: DEFAULT_SETTINGS.googleProxyEnabled,
+}
+
+/**
+ * 旧配置里缺字段时用默认值（词性默认开启、AI 命名默认关闭），
+ * 已保存的 false 必须保留，不得重置。
+ */
+export function normalizeBooleanSettings(settings) {
+  for (const [key, fallback] of Object.entries(BOOLEAN_SETTING_DEFAULTS)) {
+    const value = settings[key]
+    settings[key] = typeof value === 'boolean' ? value : fallback
+  }
+  return settings
+}
+
 
 // 已知引擎白名单：loadSettings 会用它过滤 failoverOrder，剔除未知/废弃的引擎标识，防止渲染时 engineMeta[engine] 为 undefined 致白屏
 export const KNOWN_ENGINES = ['ai', 'thirdparty-ai', 'google', 'deepl', 'deeplx', 'baidu', 'aliyun', 'caiyun']
@@ -257,6 +284,8 @@ export const loadSettings = () => {
       merged.thirdpartyAiFailoverTimeoutSeconds = normalizeEngineResponseTimeoutSeconds(
         merged.thirdpartyAiFailoverTimeoutSeconds
       )
+      // 显示类布尔设置：旧配置缺字段时补默认值（词性 true、AI 命名 false），已有 false 原样保留
+      normalizeBooleanSettings(merged)
       {
         const proxy = normalizeGoogleProxySettings(merged)
         merged.googleProxyEnabled = proxy.googleProxyEnabled
@@ -290,6 +319,7 @@ export const saveSettings = (settings) => {
     if (Array.isArray(settings && settings.thirdpartyAiGroups)) {
       payload.thirdpartyAiGroups = cloneGroups(settings.thirdpartyAiGroups)
     }
+    normalizeBooleanSettings(payload)
     payload.engineResponseTimeoutSeconds = normalizeEngineResponseTimeoutSeconds(
       payload.engineResponseTimeoutSeconds
     )

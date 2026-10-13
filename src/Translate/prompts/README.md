@@ -9,6 +9,7 @@ prompts/
 ├── index.js                # 统一导出所有提示词函数
 ├── chineseToEnglish.js     # 中译英提示词模板
 ├── englishToChinese.js     # 英译中提示词模板
+├── aiNaming.js             # AI 变量命名提示词与固定 JSON 契约（独立于翻译）
 └── polish.js               # 文本润色提示词模板
 ```
 
@@ -20,9 +21,14 @@ prompts/
 import {
   buildChineseToEnglishPrompt,
   buildEnglishToChinesePrompt,
+  buildAiNamingMessages,
   buildPolishPrompt
 } from './prompts/index.js'
 ```
+
+> AI 变量命名（`aiNaming.js`）与翻译提示词完全分离：system 为固定 JSON 契约，只返回
+> `{"shouldName": true, "words": [...]}` 或 `{"shouldName": false, "words": []}`，
+> 不使用翻译 `parseResult` 契约，也不读取用户为自定义 AI 翻译配置的系统提示词。
 
 ### 使用示例
 

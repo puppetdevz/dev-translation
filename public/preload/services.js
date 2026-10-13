@@ -21,6 +21,20 @@ const {
   translateWithCaiyun,
 } = require('./officialEngines')
 
+// 本地双语词库为打包数据：读取失败（缺文件/损坏/权限）时降级为未命中，不得阻断 window.services 初始化。
+let localDictionary = null
+let localDictionaryTried = false
+function getLocalDictionary () {
+  if (localDictionaryTried) return localDictionary
+  localDictionaryTried = true
+  try {
+    localDictionary = require('./localDictionary')
+  } catch (e) {
+    localDictionary = null
+  }
+  return localDictionary
+}
+
 // google-translate-api-x 为可选源：安装包若未带上该依赖，不得阻断整个 window.services 初始化。
 let googleLibrary = null
 let googleLibraryTried = false
@@ -932,17 +946,39 @@ window.services = {
   fetchThirdpartyModels (chatUrl, apiKey) {
     return fetchThirdpartyModels(chatUrl, apiKey)
   },
-  lookupWord (word) {
+  // 本地词库查询：命中返回结构化词条，未命中或读取失败返回 { found: false }。
+  lookupLocalDictionary (key) {
+    const dict = getLocalDictionary()
+    if (!dict || typeof dict.lookup !== 'function') return { found: false }
+    try {
+      const result = dict.lookup(key)
+      return result && typeof result === 'object' ? result : { found: false }
+    } catch (e) {
+      return { found: false }
+    }
+  },
+  // 词库元信息：版本、条目数、覆盖率与来源许可（用于设置页/验收核对，不含词条正文）。
+  localDictionaryInfo () {
+    const dict = getLocalDictionary()
+    if (!dict || typeof dict.info !== 'function') return { available: false }
+    try {
+      return dict.info()
+    } catch (e) {
+      return { available: false }
+    }
+  },
+  lookupWord (word, timeoutMs) {
     return new Promise((resolve) => {
       if (!word || typeof word !== 'string' || !word.trim()) {
         resolve(EMPTY_DICT_RESULT)
         return
       }
 
+      const budget = resolvePositiveTimeout(timeoutMs, LOOKUP_TIMEOUT_MS)
       const encodedWord = encodeURIComponent(word.trim())
       const url = `https://api.dictionaryapi.dev/api/v2/entries/en/${encodedWord}`
 
-      const req = https.get(url, { timeout: LOOKUP_TIMEOUT_MS }, (res) => {
+      const req = https.get(url, { timeout: budget }, (res) => {
         let data = ''
         res.on('data', chunk => { data += chunk })
         res.on('error', () => {})

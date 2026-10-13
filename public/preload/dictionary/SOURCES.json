@@ -1,0 +1,43 @@
+{
+  "generatedAt": "2026-10-13T09:01:30.958Z",
+  "note": "原始下载数据的下载日期、体积与 SHA-256 校验值；原始大文件与维基文本缓存不进入插件包。",
+  "downloads": [
+    {
+      "file": ".dictionary-cache/raw/en_US.txt",
+      "url": "https://raw.githubusercontent.com/open-dict-data/ipa-dict/master/data/en_US.txt",
+      "downloadedAt": "2026-10-13T08:24:53.835Z",
+      "sha256": "2af6f154a5c363275f052d1f85acedef38ed185ca9745aa4314be77f6b70de67",
+      "bytes": 3180267
+    },
+    {
+      "file": ".dictionary-cache/raw/enwiki-freq.txt",
+      "url": "https://raw.githubusercontent.com/IlyaSemenov/wikipedia-word-frequency/master/results/enwiki-2023-04-13.txt",
+      "downloadedAt": "2026-10-13T08:18:28.744Z",
+      "sha256": "e2071140a49a6c40c732bd68c36836ef13c0978233fb3d5e1b2a3c2d34faef59",
+      "bytes": 34948684
+    },
+    {
+      "file": ".dictionary-cache/raw/oewn.json.zip",
+      "url": "https://github.com/globalwordnet/english-wordnet/releases/download/2025-edition/english-wordnet-2025-json.zip",
+      "downloadedAt": "2026-10-13T08:19:12.381Z",
+      "sha256": "7d749f6e2c39e6970e4997839dcf6e42fd281f3c2fae0171d2192bae8cfa4b51",
+      "bytes": 9986555
+    }
+  ],
+  "wikitext": [
+    {
+      "project": "en-wiktionary",
+      "api": "https://en.wiktionary.org/w/api.php?action=query&prop=revisions&rvprop=content&rvslots=main&redirects=1",
+      "titles": 49110,
+      "fetchedFrom": "2026-10-13T08:25:24.922Z",
+      "fetchedTo": "2026-10-13T08:55:03.111Z"
+    },
+    {
+      "project": "zh-wiktionary",
+      "api": "https://zh.wiktionary.org/w/api.php?action=query&prop=revisions&rvprop=content&rvslots=main&redirects=1",
+      "titles": 10190,
+      "fetchedFrom": "2026-10-13T08:24:47.251Z",
+      "fetchedTo": "2026-10-13T08:55:29.376Z"
+    }
+  ]
+}

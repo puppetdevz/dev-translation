@@ -586,26 +586,6 @@ export async function runEngineFailover({
 }
 
 /**
- * 词典为可选能力：桥接缺失或查询失败时返回空结果，不破坏已成功的主译文。
- */
-export async function safeLookupWord(word, env = getRuntimeEnv()) {
-  const trimmed = (word || '').trim()
-  if (!trimmed || /\s+/.test(trimmed)) return { ...EMPTY_DICT }
-  if (!hasServiceMethod('lookupWord', env)) return { ...EMPTY_DICT }
-  try {
-    const result = await env.services.lookupWord(trimmed)
-    if (!result || typeof result !== 'object') return { ...EMPTY_DICT }
-    return {
-      phonetic: result.phonetic || '',
-      definitions: Array.isArray(result.definitions) ? result.definitions : [],
-      examples: Array.isArray(result.examples) ? result.examples : [],
-    }
-  } catch {
-    return { ...EMPTY_DICT }
-  }
-}
-
-/**
  * 只取主译文。词典不得参与引擎级结算，避免慢查询拖垮超时与回退。
  */
 export async function runMainTextTranslation(translateFn, text, from, to) {
@@ -629,6 +609,7 @@ export function wordLookupTarget({ type, lang, sourceText, translation }) {
 
 /**
  * 词典晚到补充：仅当仍是同一请求、同一成功引擎、同一主译文时才可合并。
+ * 传入 sourceText / lang / currentSourceText / currentLang 时额外校验输入与语言方向快照。
  */
 export function canApplyDictionarySupplement({
   isCurrent,
@@ -636,9 +617,268 @@ export function canApplyDictionarySupplement({
   usedEngine,
   translation,
   currentTranslation,
+  sourceText,
+  currentSourceText,
+  lang,
+  currentLang,
 }) {
   if (typeof isCurrent === 'function' && !isCurrent()) return false
   if (!engine || engine !== usedEngine) return false
   if (!translation || translation !== currentTranslation) return false
+  if (sourceText != null && currentSourceText != null && String(sourceText).trim() !== String(currentSourceText).trim()) return false
+  if (lang != null && currentLang != null && lang !== currentLang) return false
   return true
 }
+
+/** 词典补全整段总预算：主译文先展示，补全在此预算内独立完成。 */
+export const DICTIONARY_BUDGET_MS = 5000
+
+/**
+ * 带截止时间的等待：到期立即以 null 结算，晚到结果（即使底层调用无法取消）不再回填。
+ * 用于词典补全在剩余预算内结束，而不夸大底层请求已被取消。
+ */
+export function waitWithBudget(promise, timeoutMs) {
+  return new Promise((resolve) => {
+    let settled = false
+    const timer = setTimeout(() => {
+      if (settled) return
+      settled = true
+      resolve(null)
+    }, Math.max(0, Number(timeoutMs) || 0))
+    Promise.resolve(promise).then(
+      (value) => {
+        if (settled) return
+        settled = true
+        clearTimeout(timer)
+        resolve(value)
+      },
+      () => {
+        if (settled) return
+        settled = true
+        clearTimeout(timer)
+        resolve(null)
+      },
+    )
+  })
+}
+
+export const DICT_FIELD_STATE = {
+  IDLE: 'idle',
+  LOADING: 'loading',
+  AVAILABLE: 'available',
+  UNAVAILABLE: 'unavailable',
+  HIDDEN: 'hidden',
+}
+
+/** 词库查询键：trim + 小写 + 合并空白。不拆分驼峰、下划线，也不跨词条合并。 */
+export function normalizeDictionaryKey(text) {
+  return String(text == null ? '' : text).trim().toLowerCase().replace(/\s+/g, ' ')
+}
+
+/**
+ * 查询键变体：仅做空格/连字符互换，是否命中由词库中是否真的存在对应词条决定。
+ */
+export function dictionaryKeyVariants(text) {
+  const base = normalizeDictionaryKey(text)
+  if (!base) return []
+  const variants = [base]
+  if (base.includes(' ')) variants.push(base.replace(/\s+/g, '-'))
+  if (base.includes('-')) variants.push(base.replace(/-/g, ' '), base.replace(/-/g, ''))
+  return [...new Set(variants)].filter(Boolean)
+}
+
+/**
+ * 词库补全的查询目标。
+ * - 单词/词组模式：英译中查原文，中译英查成功主译文。
+ * - 句子模式：只允许用完整词条命中固定词组（不放开整句词典查询）。
+ * @returns {{target: string|null, allowNetwork: boolean, phraseOnly: boolean}}
+ */
+export function dictionaryLookupTarget({ type, lang, sourceText, translation }) {
+  const sentence = type === 'sentence'
+  const raw = lang === 'en' ? sourceText : translation
+  const target = normalizeDictionaryKey(raw)
+  if (!target) return { target: null, allowNetwork: false, phraseOnly: sentence }
+  if (sentence) {
+    // 句子分支只在完整词条命中固定词组时补全，且不发起任何在线词典请求。
+    return { target, allowNetwork: false, phraseOnly: true }
+  }
+  return { target, allowNetwork: true, phraseOnly: false }
+}
+
+const IPA_HINT_RE = /[\u0250-\u02ff\u1d00-\u1d7f]/u
+
+/** 结构性校验音标文本，避免把普通英文说明当成音标；不据此推断口音。 */
+export function hasUsablePhonetic(value) {
+  const text = String(value == null ? '' : value).trim()
+  if (!text || text.length > 60) return false
+  if (/^[/\[].*[/\]]$/.test(text)) return true
+  return IPA_HINT_RE.test(text)
+}
+
+const CJK_CHAR_RE = /[\u3400-\u9fff]/
+
+/**
+ * 词性规范化：在线词典给出的是词性全称（noun/verb/…），按明确映射收敛为缩写；
+ * 本地词库/词条已使用缩写时原样保留；无法映射的值一律不显示词性标签（不推断、不造标签）。
+ */
+const PART_OF_SPEECH_ALIASES = {
+  noun: 'n.',
+  verb: 'v.',
+  adjective: 'adj.',
+  adverb: 'adv.',
+  pronoun: 'pron.',
+  preposition: 'prep.',
+  conjunction: 'conj.',
+  interjection: 'int.',
+  determiner: 'det.',
+  article: 'art.',
+  numeral: 'num.',
+  number: 'num.',
+  particle: 'part.',
+  auxiliary: 'aux.',
+  'auxiliary verb': 'aux.',
+  phrase: 'phr.',
+  idiom: 'phr.',
+  'prepositional phrase': 'phr.',
+  contraction: 'contr.',
+  abbreviation: 'abbr.',
+  acronym: 'abbr.',
+  initialism: 'abbr.',
+  prefix: 'prefix',
+  suffix: 'suffix',
+  'proper noun': 'prop.',
+  postposition: 'postp.',
+}
+
+export function normalizePartOfSpeech(value) {
+  const raw = String(value == null ? '' : value).trim()
+  if (!raw) return ''
+  if (/^[a-z]{1,7}\.$/.test(raw)) return raw
+  return PART_OF_SPEECH_ALIASES[raw.toLowerCase()] || ''
+}
+
+function definitionTextOf(item) {
+  if (item == null) return ''
+  if (typeof item === 'string') return item.trim()
+  if (typeof item === 'object') return String(item.meaning == null ? '' : item.meaning).trim()
+  return ''
+}
+
+function definitionsAreUsable(list, lang) {
+  const items = (Array.isArray(list) ? list : []).map(definitionTextOf).filter(Boolean)
+  if (!items.length) return false
+  if (lang === 'en') return items.some(text => CJK_CHAR_RE.test(text))
+  return items.every(text => !CJK_CHAR_RE.test(text))
+}
+
+/** 方向正确的释义是否已可用（英译中要中文、中译英要英文）。 */
+export function hasUsableDefinitions(list, lang) {
+  return definitionsAreUsable(list, lang)
+}
+
+/** 从本地词库条目中取出方向正确的释义（英译中取 zh，中译英取 en）。 */
+export function pickLocalDefinitions(entry, lang) {
+  if (!entry) return []
+  const list = lang === 'en' ? entry.definitions && entry.definitions.zh : entry.definitions && entry.definitions.en
+  const out = []
+  for (const item of Array.isArray(list) ? list : []) {
+    const meaning = definitionTextOf(item)
+    if (!meaning) continue
+    if (out.some(x => x.meaning === meaning)) continue
+    out.push({ pos: normalizePartOfSpeech(item && item.pos), meaning })
+    if (out.length >= 3) break
+  }
+  return out
+}
+
+/** 本地词库仅提供来源明确标注美式（region=US）的音标。 */
+export function pickLocalPhonetic(entry) {
+  if (!entry) return ''
+  const phonetic = entry.phonetic || {}
+  if (String(phonetic.region || '').toUpperCase() !== 'US') return ''
+  return hasUsablePhonetic(phonetic.value) ? String(phonetic.value).trim() : ''
+}
+
+/**
+ * 在线词典回退：其响应不含地区标注，只能用于英文释义与例句，音标一律视为不满足美式要求。
+ */
+export async function safeLookupWord(word, env = getRuntimeEnv(), timeoutMs) {
+  const trimmed = (word || '').trim()
+  // 在线词典只服务单个单词：固定词组不拆词查询，也不新增在线词组服务
+  if (!trimmed || /\s+/.test(trimmed)) return { ...EMPTY_DICT }
+  if (!hasServiceMethod('lookupWord', env)) return { ...EMPTY_DICT }
+  try {
+    const result = typeof timeoutMs === 'number' && timeoutMs > 0
+      ? await env.services.lookupWord(trimmed, timeoutMs)
+      : await env.services.lookupWord(trimmed)
+    if (!result || typeof result !== 'object') return { ...EMPTY_DICT }
+    return {
+      phonetic: '',
+      definitions: Array.isArray(result.definitions) ? result.definitions : [],
+      examples: Array.isArray(result.examples) ? result.examples : [],
+    }
+  } catch {
+    return { ...EMPTY_DICT }
+  }
+}
+
+/** 本地词库查询：桥接缺失或条目未命中时返回 null，由上层转为缺失提示。 */
+export async function safeLookupLocalDictionary(word, env = getRuntimeEnv()) {
+  if (!hasServiceMethod('lookupLocalDictionary', env)) return null
+  const variants = dictionaryKeyVariants(word)
+  if (!variants.length) return null
+  try {
+    for (const key of variants) {
+      const entry = await env.services.lookupLocalDictionary(key)
+      if (entry && entry.found) return entry
+    }
+  } catch {
+    return null
+  }
+  return null
+}
+
+/**
+ * 字段级合并：只补缺失字段，永不覆盖主译文，也不跨方向复用释义。
+ */
+export function mergeDictionarySupplement({ result, localEntry, onlineEntry, lang, budgetMs, startedAt }) {
+  const current = result && typeof result === 'object' ? result : {}
+  const merged = { ...current }
+  const filled = { phonetic: false, definitions: false, examples: false }
+
+  if (!hasUsablePhonetic(merged.phonetic)) {
+    const local = pickLocalPhonetic(localEntry)
+    if (local) {
+      merged.phonetic = local
+      filled.phonetic = true
+    }
+  }
+
+  if (!hasUsableDefinitions(merged.definitions, lang)) {
+    const fromLocal = pickLocalDefinitions(localEntry, lang)
+    if (fromLocal.length) {
+      merged.definitions = fromLocal
+      filled.definitions = true
+    } else if (lang !== 'en' && onlineEntry && Array.isArray(onlineEntry.definitions)) {
+      // 中译英可用在线词典的英文释义；英译中不使用英文释义充当中文含义
+      const usable = onlineEntry.definitions
+        .map(item => ({ pos: normalizePartOfSpeech(item && item.pos), meaning: definitionTextOf(item) }))
+        .filter(item => item.meaning && !CJK_CHAR_RE.test(item.meaning))
+        .slice(0, 3)
+      if (usable.length) {
+        merged.definitions = usable
+        filled.definitions = true
+      }
+    }
+  }
+
+  if ((!Array.isArray(merged.examples) || !merged.examples.length) && onlineEntry && Array.isArray(onlineEntry.examples) && onlineEntry.examples.length) {
+    merged.examples = onlineEntry.examples.slice(0, 2)
+    filled.examples = true
+  }
+
+  void budgetMs
+  void startedAt
+  return { result: merged, filled }
+}
+

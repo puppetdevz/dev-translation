@@ -291,3 +291,75 @@ describe('snapshotEngineTimeoutMs', () => {
     assert.equal(snapshotEngineTimeoutMs(settings), 5000)
   })
 })
+
+describe('输出开关：词性与 AI 命名', () => {
+  beforeEach(() => {
+    for (const k of Object.keys(store)) delete store[k]
+  })
+
+  it('默认设置：词性开启、AI 命名关闭，且保留既有音标/释义/变量命名开关', () => {
+    const s = loadSettings()
+    assert.equal(DEFAULT_SETTINGS.showPartOfSpeech, true)
+    assert.equal(DEFAULT_SETTINGS.showAiNaming, false)
+    assert.equal(s.showPartOfSpeech, true)
+    assert.equal(s.showAiNaming, false)
+    assert.equal(s.showPhonetic, true)
+    assert.equal(s.showDefinitions, true)
+    assert.equal(s.showVariableNaming, true)
+    // 不新增第二套音标开关
+    assert.equal(Object.keys(s).filter(k => /phonetic/i.test(k)).length, 1)
+  })
+
+  it('旧配置缺新字段时补默认值：词性 true、AI 命名 false', () => {
+    store[STORAGE_KEY] = JSON.stringify({
+      showPhonetic: false,
+      showDefinitions: false,
+      showVariableNaming: false,
+      failoverOrder: ['baidu', 'ai', 'thirdparty-ai', 'deepl', 'deeplx'],
+      baiduAppId: 'keep-id',
+    })
+    const s = loadSettings()
+    assert.equal(s.showPhonetic, false)
+    assert.equal(s.showDefinitions, false)
+    assert.equal(s.showVariableNaming, false)
+    assert.equal(s.showPartOfSpeech, true)
+    assert.equal(s.showAiNaming, false)
+    assert.equal(s.baiduAppId, 'keep-id')
+  })
+
+  it('已保存的 true/false 不被重置，非布尔值回退默认', () => {
+    store[STORAGE_KEY] = JSON.stringify({
+      showPhonetic: false,
+      showDefinitions: true,
+      showPartOfSpeech: false,
+      showAiNaming: true,
+      showVariableNaming: false,
+    })
+    const s = loadSettings()
+    assert.equal(s.showPhonetic, false)
+    assert.equal(s.showDefinitions, true)
+    assert.equal(s.showPartOfSpeech, false)
+    assert.equal(s.showAiNaming, true)
+    assert.equal(s.showVariableNaming, false)
+
+    store[STORAGE_KEY] = JSON.stringify({
+      showPartOfSpeech: 'false',
+      showAiNaming: 'true',
+      showPhonetic: 0,
+    })
+    const coerced = loadSettings()
+    assert.equal(coerced.showPartOfSpeech, true)
+    assert.equal(coerced.showAiNaming, false)
+    assert.equal(coerced.showPhonetic, true)
+  })
+
+  it('保存时也按布尔值持久化，读回仍一致', () => {
+    const s = loadSettings()
+    s.showPartOfSpeech = false
+    s.showAiNaming = true
+    saveSettings(s)
+    const reloaded = loadSettings()
+    assert.equal(reloaded.showPartOfSpeech, false)
+    assert.equal(reloaded.showAiNaming, true)
+  })
+})
