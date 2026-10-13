@@ -744,3 +744,64 @@ describe('PROBE_NO_SUCCESS_MESSAGE', () => {
     assert.equal(PROBE_NO_SUCCESS_MESSAGE, '无可用引擎，未调整顺序')
   })
 })
+
+describe('引擎关闭在批量测试中的处理', () => {
+  const DISABLED = { ...CONFIGURED, engineEnabled: { ai: false, google: false } }
+
+  it('关闭项显示「已关闭，未测试」，无耗时且不进 pending', () => {
+    const items = inspectProbeEngines(DISABLED, READY_ENV, 'Hello World')
+    const ai = items.find(i => i.engine === 'ai')
+    const google = items.find(i => i.engine === 'google')
+    assert.equal(ai.status, 'skipped')
+    assert.equal(ai.durationMs, null)
+    assert.equal(formatProbeItemText(ai), '已关闭，未测试')
+    assert.equal(google.skipReason, SKIP_REASON.DISABLED)
+    assert.equal(google.skipCategory, SKIP_CATEGORY.DISABLED)
+  })
+
+  it('关闭项不发请求，开启项照常探测', async () => {
+    const calls = []
+    const out = await runBatchEngineProbe({
+      settings: DISABLED,
+      env: READY_ENV,
+      timeoutMs: 60,
+      text: 'Hello World disabled',
+      translateWith: async (engine) => {
+        calls.push(engine)
+        return { translation: 'ok' }
+      },
+    })
+    assert.equal(calls.includes('ai'), false)
+    assert.equal(calls.includes('google'), false)
+    assert.ok(calls.includes('deepl'))
+    const byEngine = Object.fromEntries(out.results.map(r => [r.engine, r]))
+    assert.equal(byEngine.ai.safeMessage, '已关闭，未测试')
+    assert.equal(byEngine.google.durationMs, null)
+    assert.equal(out.hadSuccess, true)
+  })
+
+  it('排序时关闭项统一移至末尾并保持排序前相对顺序，开启项按既有规则排序', () => {
+    const original = ['ai', 'thirdparty-ai', 'google', 'deepl', 'deeplx']
+    const results = [
+      { engine: 'ai', status: 'skipped', disabled: true, skipReason: SKIP_REASON.DISABLED },
+      { engine: 'thirdparty-ai', status: 'failure', durationMs: 9 },
+      { engine: 'google', status: 'skipped', disabled: true, skipReason: SKIP_REASON.DISABLED },
+      { engine: 'deepl', status: 'success', durationMs: 40 },
+      { engine: 'deeplx', status: 'success', durationMs: 10 },
+    ]
+    const sorted = sortByProbeResults(original, results)
+    assert.deepEqual(sorted.slice(0, 5), ['deeplx', 'deepl', 'thirdparty-ai', 'baidu', 'aliyun'])
+    // ai 与 google 保持原相对顺序（ai 在 google 之前）接在末尾
+    assert.deepEqual(sorted.slice(5), ['caiyun', 'ai', 'google'])
+    assert.ok(KNOWN_ENGINES.every(e => sorted.includes(e)))
+  })
+
+  it('开关变化纳入探测快照比较', () => {
+    const snap = snapshotProbeConfig(CONFIGURED)
+    assert.equal(isProbeConfigUnchanged(snap, CONFIGURED), true)
+    assert.equal(isProbeConfigUnchanged(snap, { ...CONFIGURED, engineEnabled: { ai: false } }), false)
+    const snapOff = snapshotProbeConfig({ ...CONFIGURED, engineEnabled: { ai: false } })
+    assert.equal(isProbeConfigUnchanged(snapOff, { ...CONFIGURED, engineEnabled: { ai: false } }), true)
+    assert.equal(isProbeConfigUnchanged(snapOff, { ...CONFIGURED, engineEnabled: { ai: true } }), false)
+  })
+})

@@ -29,6 +29,10 @@ const props = defineProps({
   usedEngineLabel: {
     type: String,
     default: ''
+  },
+  detectionNotice: {
+    type: String,
+    default: ''
   }
 })
 
@@ -147,6 +151,8 @@ const handleKeydown = (event) => {
         <span class="used-engine-badge-dot"></span>
         <span class="used-engine-badge-text">由 {{ usedEngineLabel }} 翻译</span>
       </div>
+
+      <p v-else-if="detectionNotice" class="detection-notice" role="status">{{ detectionNotice }}</p>
 
       <!-- 右侧：操作按钮 -->
       <div class="input-actions-btns">
@@ -473,6 +479,24 @@ const handleKeydown = (event) => {
   white-space: nowrap;
 }
 
+/* 语言检测降级提示：非阻塞、可恢复，不遮挡操作按钮 */
+.detection-notice {
+  margin: 0;
+  padding: 5px 10px;
+  max-width: 100%;
+  border: 1px solid rgba(251, 191, 36, 0.5);
+  border-radius: 8px;
+  background: #fffbeb;
+  color: #92400e;
+  font-size: 11px;
+  font-weight: 600;
+  line-height: 1.3;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  animation: used-engine-fade-in 0.3s ease;
+}
+
 @keyframes used-engine-fade-in {
   from {
     opacity: 0;
@@ -735,6 +759,12 @@ const handleKeydown = (event) => {
 
   .used-engine-badge-dot {
     background: #a5b4fc;
+  }
+
+  .detection-notice {
+    background: rgba(146, 64, 14, 0.2);
+    border-color: rgba(251, 191, 36, 0.3);
+    color: #fcd34d;
   }
 
   .language-badge-placeholder {

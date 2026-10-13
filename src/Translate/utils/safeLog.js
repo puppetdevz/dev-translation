@@ -21,6 +21,7 @@ const ALLOWED_CATEGORY = {
   empty_result: true,
   network_error: true,
   proxy_connect: true,
+  disabled: true,
   library_missing: true,
   unknown: true,
 }
@@ -50,6 +51,7 @@ const ALLOWED_SKIP_REASON = {
   method_missing: true,
   not_configured: true,
   input_limit: true,
+  disabled: true,
 }
 
 // 历史 message / engine / id 都可能由旧调用方或服务端写入，不能靠关键词猜测是否安全。
@@ -59,7 +61,8 @@ const ALLOWED_ENGINES = new Set([
 // 固定字面量消息：不含原文、译文、URL、凭据或模型返回内容
 const SAFE_MESSAGES = new Set([
   '翻译成功', '翻译服务未加载', '翻译流程异常', '所有引擎均失败',
-  'AI 语言检测失败', '文本润色失败',
+  'AI 语言检测失败', 'AI 语言检测降级', '文本润色失败',
+  'AI 语言检测来源跳过', '文本润色来源跳过',
   'AI 命名成功', 'AI 命名调用失败', 'AI 命名来源跳过',
 ])
 
@@ -81,6 +84,7 @@ function categoryFallbackMessage(category, statusCode) {
   if (category === 'empty_result') return '引擎返回空结果'
   if (category === 'network_error') return '网络请求失败'
   if (category === 'proxy_connect') return '代理连接失败'
+  if (category === 'disabled') return '引擎已关闭'
   if (category === 'library_missing') return '翻译库不可用'
   return '已记录一次安全诊断事件'
 }
@@ -132,7 +136,7 @@ export function sanitizeLogEntry(entry) {
   const statusCode = pickFiniteStatus(entry.statusCode)
   const phase = ALLOWED_PHASE[entry.phase] ? entry.phase : undefined
   const skipReason = ALLOWED_SKIP_REASON[entry.skipReason] ? entry.skipReason : undefined
-  const skipCategory = (entry.skipCategory === 'env' || entry.skipCategory === 'config' || entry.skipCategory === 'input')
+  const skipCategory = (entry.skipCategory === 'env' || entry.skipCategory === 'config' || entry.skipCategory === 'input' || entry.skipCategory === 'disabled')
     ? entry.skipCategory
     : undefined
   const requestId = Number.isFinite(Number(entry.requestId)) ? Number(entry.requestId) : undefined

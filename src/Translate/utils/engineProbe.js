@@ -10,8 +10,12 @@ import {
   attemptEngineCall,
   getRuntimeEnv,
   runMainTextTranslation,
+  SKIP_REASON,
+  SKIP_CATEGORY,
+  ERROR_CATEGORY,
 } from './engineBridge.js'
 import { KNOWN_ENGINES, snapshotEngineTimeoutMs, snapshotThirdpartyAiTimeoutMs, snapshotGoogleProxy } from './storage.js'
+import { isEngineEnabled, cloneEngineEnabled } from './engineAvailability.js'
 import {
   runThirdpartyAiGroupFailover,
   snapshotThirdpartyAiGroups,
@@ -19,6 +23,7 @@ import {
 } from './thirdpartyAiGroups.js'
 
 export const PROBE_NO_SUCCESS_MESSAGE = '无可用引擎，未调整顺序'
+export const PROBE_DISABLED_MESSAGE = '已关闭，未测试'
 
 export const PROBE_APPLY = {
   OK: 'ok',
@@ -72,10 +77,16 @@ function serializeGroups(groups) {
   return (groups || []).map(g => `${g.id}\0${g.name}\0${g.url}\0${g.apiKey}\0${g.model}`).join('\n')
 }
 
+function serializeEngineEnabled(map) {
+  const normalized = cloneEngineEnabled(map)
+  return KNOWN_ENGINES.map(engine => `${engine}:${normalized[engine] ? '1' : '0'}`).join(',')
+}
+
 export function snapshotProbeConfig(settings) {
   const s = settings || {}
   return {
     failoverOrder: Array.isArray(s.failoverOrder) ? [...s.failoverOrder] : [],
+    engineEnabled: cloneEngineEnabled(s.engineEnabled),
     engineResponseTimeoutSeconds: s.engineResponseTimeoutSeconds,
     thirdpartyAiFailoverTimeoutSeconds: s.thirdpartyAiFailoverTimeoutSeconds,
     deeplApiKey: s.deeplApiKey || '',
@@ -102,6 +113,7 @@ export function isProbeConfigUnchanged(snapshot, settings) {
   }
   return (
     snapshot.engineResponseTimeoutSeconds === current.engineResponseTimeoutSeconds
+    && serializeEngineEnabled(snapshot.engineEnabled) === serializeEngineEnabled(current.engineEnabled)
     && snapshot.thirdpartyAiFailoverTimeoutSeconds === current.thirdpartyAiFailoverTimeoutSeconds
     && snapshot.deeplApiKey === current.deeplApiKey
     && snapshot.deeplxServerUrl === current.deeplxServerUrl
@@ -130,8 +142,28 @@ function skippedItem(engine, inspection) {
   }
 }
 
+/** 关闭项：无耗时、不发请求、不视为失败。 */
+function disabledItem(engine) {
+  return {
+    engine,
+    status: 'skipped',
+    disabled: true,
+    skipReason: SKIP_REASON.DISABLED,
+    skipCategory: SKIP_CATEGORY.DISABLED,
+    category: ERROR_CATEGORY.DISABLED,
+    safeMessage: PROBE_DISABLED_MESSAGE,
+    durationMs: null,
+  }
+}
+
+function isDisabledItem(item) {
+  return !!item && (item.disabled === true || item.skipReason === SKIP_REASON.DISABLED)
+}
+
 export function inspectProbeEngines(settings = {}, env = getRuntimeEnv(), text) {
   return resolveProbeEngines(settings.failoverOrder).map((engine) => {
+    // 先判断启停：关闭项不检查配置、不发请求、不计耗时。
+    if (!isEngineEnabled(settings, engine)) return disabledItem(engine)
     const inspection = inspectEngineForCall(engine, settings, env, text)
     if (inspection.status === 'skipped') return skippedItem(engine, inspection)
     return { engine, status: 'pending', durationMs: null, safeMessage: '' }
@@ -140,17 +172,21 @@ export function inspectProbeEngines(settings = {}, env = getRuntimeEnv(), text) 
 
 /**
  * 成功组按耗时从短到长；失败组随后、跳过组最后。
- * 同组（含成功组耗时相同）保持原列表相对次序。输出含全部已知引擎，无重复。
+ * 同组（含成功组耗时相同）保持原列表相对次序。
+ * 关闭项不参与既有排序规则，统一移至末尾并保持排序前的相对顺序。
+ * 输出含全部已知引擎，无重复。
  */
 export function sortByProbeResults(originalOrder, results) {
   const engines = resolveProbeEngines(originalOrder)
   const byEngine = new Map((results || []).map(item => [item.engine, item]))
-  const rank = new Map(engines.map((engine, index) => [engine, index]))
+  const enabled = engines.filter(engine => !isDisabledItem(byEngine.get(engine)))
+  const disabled = engines.filter(engine => isDisabledItem(byEngine.get(engine)))
+  const rank = new Map(enabled.map((engine, index) => [engine, index]))
   const success = []
   const failure = []
   const skipped = []
 
-  for (const engine of engines) {
+  for (const engine of enabled) {
     const item = byEngine.get(engine)
     if (item && item.status === 'success') success.push(engine)
     else if (item && item.status === 'failure') failure.push(engine)
@@ -166,7 +202,7 @@ export function sortByProbeResults(originalOrder, results) {
     return rank.get(a) - rank.get(b)
   })
 
-  return [...success, ...failure, ...skipped]
+  return [...success, ...failure, ...skipped, ...disabled]
 }
 
 export function applyProbeOrder({
@@ -443,6 +479,11 @@ export async function runBatchEngineProbe({
   const originalOrder = Array.isArray(settings.failoverOrder) ? [...settings.failoverOrder] : []
 
   const results = engines.map((engine) => {
+    if (!isEngineEnabled(settings, engine)) {
+      const item = disabledItem(engine)
+      onItem?.(item)
+      return item
+    }
     const inspection = inspectEngineForCall(engine, settings, runtime, probeText)
     if (inspection.status === 'skipped') {
       const item = skippedItem(engine, inspection)

@@ -5,6 +5,7 @@
 
 import { hasReadyThirdpartyAiGroup } from './thirdpartyAiGroups.js'
 import { sanitizeGoogleAttempts } from './safeLog.js'
+import { isEngineEnabled, KNOWN_ENGINES } from './engineAvailability.js'
 
 export const ENGINE_DISPLAY_NAMES = {
   ai: 'uTools AI',
@@ -32,13 +33,18 @@ export const SKIP_REASON = {
   METHOD_MISSING: 'method_missing',
   NOT_CONFIGURED: 'not_configured',
   INPUT_LIMIT: 'input_limit',
+  DISABLED: 'disabled',
 }
 
 export const SKIP_CATEGORY = {
   ENV: 'env',
   CONFIG: 'config',
   INPUT: 'input',
+  DISABLED: 'disabled',
 }
+
+/** 全部关闭时的统一用户提示；不隐式恢复 uTools AI。 */
+export const NO_ENABLED_ENGINE_MESSAGE = '请至少开启一个翻译引擎'
 
 export const ERROR_CATEGORY = {
   STATUS_524: 'status_524',
@@ -56,6 +62,7 @@ export const ERROR_CATEGORY = {
   EMPTY_RESULT: 'empty_result',
   NETWORK_ERROR: 'network_error',
   PROXY_CONNECT: 'proxy_connect',
+  DISABLED: 'disabled',
   UNKNOWN: 'unknown',
 }
 
@@ -104,6 +111,7 @@ export const SAFE_MESSAGES = {
   NETWORK_ERROR: '网络请求失败',
   PROXY_CONNECT: '代理连接失败',
   UNKNOWN: '引擎调用失败',
+  DISABLED: '引擎已关闭',
   RELOAD_HINT: '翻译服务未加载。请重载插件，或确认安装的是最新版本后重新安装。',
 }
 
@@ -127,6 +135,23 @@ export function engineDisplayName(engine) {
 
 function isBlank(value) {
   return !value || !String(value).trim()
+}
+
+/** 关闭项准入结果：只表示用户开关关闭，不代表配置或环境故障。 */
+export function disabledInspection() {
+  return {
+    status: 'skipped',
+    skipReason: SKIP_REASON.DISABLED,
+    skipCategory: SKIP_CATEGORY.DISABLED,
+    category: ERROR_CATEGORY.DISABLED,
+    safeMessage: SAFE_MESSAGES.DISABLED,
+  }
+}
+
+/** 自动路径准入：关闭项直接跳过，不发请求。手动维护入口不调用此函数。 */
+export function inspectEngineAdmission(engine, settings = {}) {
+  if (!isEngineEnabled(settings, engine)) return disabledInspection()
+  return { status: 'ready' }
 }
 
 /**
@@ -254,6 +279,9 @@ export function inspectEngineInputLimit(engine, text) {
 }
 
 export function inspectEngineForCall(engine, settings = {}, env = getRuntimeEnv(), text) {
+  // 自动路径专用：启停准入 + 配置/桥接可用性 + 输入限制。手动维护入口用 inspectEngine()。
+  const admission = inspectEngineAdmission(engine, settings)
+  if (admission.status === 'skipped') return admission
   const inspection = inspectEngine(engine, settings, env)
   if (inspection.status === 'skipped') return inspection
   return inspectEngineInputLimit(engine, text)
@@ -381,6 +409,9 @@ export function skipUserMessage(inspection) {
   }
   if (inspection.skipReason === SKIP_REASON.METHOD_MISSING) {
     return '翻译服务方法不可用。请重载插件，或确认安装的是最新版本后重新安装。'
+  }
+  if (inspection.skipReason === SKIP_REASON.DISABLED) {
+    return SAFE_MESSAGES.DISABLED
   }
   return inspection.safeMessage || SAFE_MESSAGES.UNKNOWN
 }
@@ -529,10 +560,18 @@ export async function runEngineFailover({
   text,
 }) {
   const outcomes = []
-  const list = Array.isArray(order) && order.length > 0 ? order : ['ai']
+  const settingsSnap = settings || {}
+  // 仅当 order 不是数组（旧调用方缺参数）时才兜底为 ['ai']。
+  // 显式空数组或全部关闭是合法状态，不得隐式恢复 uTools AI。
+  const requested = Array.isArray(order) ? order : ['ai']
+  const list = requested.filter(engine => KNOWN_ENGINES.includes(engine) && isEngineEnabled(settingsSnap, engine))
   const runtime = env || getRuntimeEnv()
   const budget = resolveEngineTimeoutMs(timeoutMs)
   let bridgeMissingNotified = false
+
+  if (list.length === 0) {
+    return { stale: false, success: false, noEngine: true, outcomes, message: NO_ENABLED_ENGINE_MESSAGE }
+  }
 
   for (let i = 0; i < list.length; i++) {
     if (typeof isCurrent === 'function' && !isCurrent()) {

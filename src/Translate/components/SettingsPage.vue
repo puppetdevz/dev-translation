@@ -1,12 +1,12 @@
 <script setup>
 import { computed, ref, reactive, onMounted, onUnmounted, watch, nextTick } from 'vue'
-import { useRouter } from 'vue-router'
+import { useRouter, useRoute } from 'vue-router'
 import { useSettings } from '../utils/useSettings.js'
 import { copyText } from '../utils/clipboard.js'
 import { getLogs, clearLogs, getLogCount, formatLogsText } from '../utils/logger.js'
 import { LOG_LEVEL_OPTIONS, LOG_RETENTION_OPTIONS, levelLabel } from '../utils/logConstants.js'
 import { getEngineStats, clearEngineStats, computeStability, ENGINE_STATS_RECENT_WINDOW } from '../utils/engineStats.js'
-import { inspectEngine, classifyError, skipUserMessage, getRuntimeEnv } from '../utils/engineBridge.js'
+import { inspectEngine, classifyError, skipUserMessage, getRuntimeEnv, NO_ENABLED_ENGINE_MESSAGE } from '../utils/engineBridge.js'
 import {
   normalizeEngineResponseTimeoutSeconds,
   ENGINE_RESPONSE_TIMEOUT_MIN,
@@ -37,8 +37,18 @@ import {
   PROBE_NO_SUCCESS_MESSAGE,
   PROBE_APPLY,
 } from '../utils/engineProbe.js'
+import {
+  engineKindLabel,
+  getEnabledEngineOrder,
+  getPrimaryEnabledEngine,
+  isEngineEnabled,
+  setEngineEnabled,
+  composeOrderWithDisabled,
+  cloneEngineEnabled,
+} from '../utils/engineAvailability.js'
 
 const router = useRouter()
+const route = useRoute()
 const { settings, updateSetting, toggleSetting } = useSettings()
 
 const handleBack = () => {
@@ -59,7 +69,7 @@ const handleStrategySelect = (strategy) => {
 const saveNotice = ref('')
 const persistSetting = (key, value) => {
   const ok = updateSetting(key, value)
-  saveNotice.value = ok ? '' : '保存失败'
+  saveNotice.value = ok ? '' : '保存失败，重启后可能恢复原状态'
   return ok
 }
 
@@ -117,9 +127,17 @@ const officialEngineConfigured = (engine) => {
   return true
 }
 
-const mainEngine = computed(() => (settings.failoverOrder && settings.failoverOrder[0]) || 'ai')
+const mainEngine = computed(() => getPrimaryEnabledEngine(settings))
+const noEnabledEngine = computed(() => mainEngine.value === null)
 
 const selectedEngine = ref((settings.failoverOrder && settings.failoverOrder[0]) || 'ai')
+
+const selectedEngineEnabled = computed(() => isEngineEnabled(settings, selectedEngine.value))
+
+const toggleEngineEnabled = (engine) => {
+  const next = setEngineEnabled(settings.engineEnabled, engine, !isEngineEnabled(settings, engine))
+  persistSetting('engineEnabled', next)
+}
 
 const selectEngine = (engine) => {
   selectedEngine.value = engine
@@ -262,6 +280,7 @@ let probeStale = false
 watch(
   () => [
     JSON.stringify(settings.failoverOrder || []),
+    JSON.stringify(cloneEngineEnabled(settings.engineEnabled)),
     settings.engineResponseTimeoutSeconds,
     settings.thirdpartyAiFailoverTimeoutSeconds,
     settings.deeplApiKey,
@@ -292,6 +311,14 @@ const mergeProbeItem = (item) => {
 }
 
 const runBatchProbe = async () => {
+  // 全部关闭：不发任何请求，也不隐式恢复 uTools AI
+  if (getEnabledEngineOrder(settings).length === 0) {
+    probeSummary.value = NO_ENABLED_ENGINE_MESSAGE
+    probeSummaryKind.value = 'noop'
+    probeResults.value = null
+    probeDetailsOpen.value = false
+    return
+  }
   if (!probeGuard.tryStart()) return
   probeRunning.value = true
   probeDetailsOpen.value = true
@@ -363,7 +390,15 @@ const dragOverIndex = ref(null)
 // 拖拽落点相对目标卡片的位置：'before' 插入到目标之前、'after' 插入到目标之后
 const dragOverPos = ref(null)
 
-const onDragStart = (index) => { dragIndex.value = index }
+const onDragStart = (event, index) => {
+  // 开关按钮上的拖动不得触发卡片拖拽/排序
+  const target = event && event.target
+  if (target && typeof target.closest === 'function' && target.closest('.engine-enable-toggle')) {
+    event.preventDefault()
+    return
+  }
+  dragIndex.value = index
+}
 const onDragOver = (index, event) => {
   if (dragIndex.value === null || dragIndex.value === index) return
   // 依据光标在目标卡片的上/下半区决定插入方向，下半区即可将元素放到末尾
@@ -710,7 +745,7 @@ const handleDeeplxUrlInput = (value) => {
 }
 
 const POS_OUTPUT_ITEM = { key: 'showPartOfSpeech', label: '显示词性', desc: '显示 n./v./adj. 等词性标签；关闭只隐藏标签，释义含义不变' }
-const AI_NAMING_OUTPUT_ITEM = { key: 'showAiNaming', label: 'AI 命名', desc: '按用途生成一个语义名称；需已配置 AI 来源，开启后会额外联网发送本次输入与译文并消耗额度' }
+const AI_NAMING_OUTPUT_ITEM = { key: 'showAiNaming', label: 'AI 命名', desc: '按用途生成一个语义名称；只使用已开启的 AI 来源，开启后会额外联网发送本次输入与译文并消耗额度' }
 
 const aiOutputs = [
   { key: 'showPhonetic', label: '显示音标', desc: '只显示来源明确的美式 IPA；无法确认口音时不采用，缺失由本地词库补全' },
@@ -739,8 +774,11 @@ const deeplOutputs = [
 ]
 
 const currentOutputs = computed(() => {
-  if (mainEngine.value === 'ai' || mainEngine.value === 'thirdparty-ai') return aiOutputs
-  if (mainEngine.value === 'deepl' || mainEngine.value === 'deeplx') return deeplOutputs
+  const main = mainEngine.value
+  // 无启用引擎时不伪造 AI/MT 模式，由页面提示先启用引擎；已保存偏好值不清空
+  if (!main) return null
+  if (main === 'ai' || main === 'thirdparty-ai') return aiOutputs
+  if (main === 'deepl' || main === 'deeplx') return deeplOutputs
   return googleOutputs
 })
 
@@ -784,6 +822,7 @@ const stabilityList = computed(() => {
     .map(id => ({
       id,
       meta: engineMeta[id],
+      enabled: isEngineEnabled(settings, id),
       metrics: computeStability(engineStats.value[id] || null),
     }))
 })
@@ -805,17 +844,20 @@ const stabilityBarClass = (metrics) => {
 }
 
 const sortedByStability = computed(() => {
-  const order = settings.failoverOrder || []
   const stats = engineStats.value
-  const entries = order.map(id => ({ id, metrics: computeStability(stats[id] || null) }))
-  const withData = entries.filter(e => e.metrics.hasData)
-  const withoutData = entries.filter(e => !e.metrics.hasData)
+  // 仅对开启项使用既有稳定性规则；关闭项统一移至末尾且保持原相对顺序，不自动开启
+  const enabled = getEnabledEngineOrder(settings)
+    .filter(id => engineMeta[id])
+    .map(id => ({ id, metrics: computeStability(stats[id] || null) }))
+  const withData = enabled.filter(e => e.metrics.hasData)
+  const withoutData = enabled.filter(e => !e.metrics.hasData)
   withData.sort((a, b) => {
     const rA = a.metrics.rate ?? -1
     const rB = b.metrics.rate ?? -1
     return rB - rA
   })
-  return [...withData.map(e => e.id), ...withoutData.map(e => e.id)]
+  const orderedEnabled = [...withData.map(e => e.id), ...withoutData.map(e => e.id)]
+  return composeOrderWithDisabled(orderedEnabled, settings)
 })
 
 const stabilityToast = ref('')
@@ -831,7 +873,15 @@ const handleClearStats = () => {
   refreshEngineStats()
 }
 
-onMounted(() => { refreshLogs(); refreshEngineStats() })
+onMounted(() => {
+  refreshLogs()
+  refreshEngineStats()
+  // 从翻译页快捷入口进入时定位到引擎分类（分类选择本身不持久化）
+  const category = route.query && route.query.category
+  if (category && SETTINGS_CATEGORIES.some(c => c.id === category)) {
+    activeCategory.value = category
+  }
+})
 
 const selectCategory = (id) => {
   if (activeCategory.value === id) return
@@ -916,7 +966,7 @@ const handleRecentError = () => {
               >
                 <div class="strategy-info">
                   <span class="strategy-name">AI 模型</span>
-                  <span class="strategy-desc">调用 AI 识别，更准确（有延迟）</span>
+                  <span class="strategy-desc">调用 AI 识别，更准确（有延迟）；按已开启 AI 来源顺序回退，全部不可用时回退本地规则并提示一次</span>
                 </div>
                 <span class="strategy-check" v-if="settings.detectionStrategy === 'ai'">✓</span>
               </button>
@@ -925,8 +975,9 @@ const handleRecentError = () => {
 
           <div class="settings-section">
             <h3 class="section-title">输出设置</h3>
-            <p class="section-hint">选项由当前主引擎决定（故障转移顺序的首位），与引擎页选中的配置卡无关。</p>
-            <div class="outputs-list">
+            <p v-if="noEnabledEngine" class="section-hint engine-disabled-hint">当前没有启用任何翻译引擎，已保存的输出偏好仍会保留；请到「引擎」分类开启至少一个引擎。</p>
+            <p v-else class="section-hint">选项由当前有效主引擎决定（顺序中首个开启项），与引擎页选中的配置卡无关。</p>
+            <div v-if="currentOutputs" class="outputs-list">
               <div
                 v-for="item in currentOutputs"
                 :key="item.key"
@@ -961,7 +1012,13 @@ const handleRecentError = () => {
         >
       <div class="settings-section">
         <h3 class="section-title">翻译引擎配置</h3>
-        <p class="section-hint">拖拽列表调整故障转移顺序（首位为主引擎），点击查看引擎配置。</p>
+        <p class="section-hint">拖拽列表调整优先级，开启项中首个为主引擎。开关决定引擎是否参与自动翻译、AI 检测/润色/命名及批量测试；关闭不会删除已保存的 Key、地址、组与历史统计。</p>
+        <p class="engine-primary-summary">
+          <span>当前主引擎：</span>
+          <strong v-if="mainEngine">{{ engineMeta[mainEngine] ? engineMeta[mainEngine].name : mainEngine }}</strong>
+          <strong v-else class="engine-primary-none">无启用引擎</strong>
+          <span class="engine-primary-hint">（首个开启项；未配置时仍为主引擎，调用时跳过）</span>
+        </p>
         <p v-if="saveNotice" class="save-failed-notice">{{ saveNotice }}</p>
         <div class="timeout-row">
           <div class="timeout-row-info">
@@ -998,7 +1055,7 @@ const handleRecentError = () => {
                 <span>测试中…</span>
               </template>
             </button>
-            <span class="probe-bar-hint">真实请求可能消耗额度；至少一个成功时按本轮速度自动重排并保存。</span>
+            <span class="probe-bar-hint">真实请求可能消耗额度；仅开启项参与测试，已关闭项显示「已关闭，未测试」且不发请求；至少一个开启项成功时按本轮速度自动重排并保存。</span>
           </div>
           <p v-if="probeSummary" class="probe-summary" :class="'probe-summary-' + probeSummaryKind">{{ probeSummary }}</p>
           <template v-if="probeResults">
@@ -1034,13 +1091,14 @@ const handleRecentError = () => {
                 class="engine-card"
                 :class="{
                   active: selectedEngine === engine,
+                  'engine-disabled': !isEngineEnabled(settings, engine),
                   dragging: dragIndex === index,
                   'drag-over': dragOverIndex === index && dragIndex !== index,
                   'drag-over-before': dragOverIndex === index && dragIndex !== index && dragOverPos === 'before',
                   'drag-over-after': dragOverIndex === index && dragIndex !== index && dragOverPos === 'after'
                 }"
                 draggable="true"
-                @dragstart="onDragStart(index)"
+                @dragstart="onDragStart($event, index)"
                 @dragover.prevent="onDragOver(index, $event)"
                 @drop.prevent="onDrop(index)"
                 @dragend="onDragEnd"
@@ -1050,9 +1108,29 @@ const handleRecentError = () => {
                 <span v-if="engineMeta[engine].icon" class="engine-card-icon">{{ engineMeta[engine].icon }}</span>
                 <span v-else class="brand-badge" :class="engineMeta[engine].brandClass">{{ engineMeta[engine].brand }}</span>
                 <div class="engine-card-info">
-                  <span class="engine-card-name">{{ engineMeta[engine].name }}</span>
-                  <span v-if="!officialEngineConfigured(engine)" class="engine-card-unconfigured">未配置</span>
+                  <div class="engine-card-title">
+                    <span class="engine-card-name">{{ engineMeta[engine].name }}</span>
+                    <span class="engine-kind-tag" :class="engineKindLabel(engine) === 'AI' ? 'kind-ai' : 'kind-mt'">{{ engineKindLabel(engine) }}</span>
+                  </div>
+                  <div class="engine-card-meta">
+                    <span v-if="mainEngine === engine" class="engine-primary-tag">主引擎</span>
+                    <span v-if="!isEngineEnabled(settings, engine)" class="engine-card-off">已关闭</span>
+                    <span v-if="!officialEngineConfigured(engine)" class="engine-card-unconfigured">未配置</span>
+                  </div>
                 </div>
+                <button
+                  type="button"
+                  class="toggle-switch engine-enable-toggle"
+                  :class="{ active: isEngineEnabled(settings, engine) }"
+                  :aria-pressed="isEngineEnabled(settings, engine) ? 'true' : 'false'"
+                  :aria-label="`${engineMeta[engine].name} 引擎开关`"
+                  :title="isEngineEnabled(settings, engine) ? '已开启，点击关闭（不删除配置）' : '已关闭，点击开启'"
+                  draggable="false"
+                  @click.stop="toggleEngineEnabled(engine)"
+                  @dragstart.stop.prevent
+                >
+                  <span class="toggle-slider"></span>
+                </button>
                 <span class="engine-priority">P{{ index + 1 }}</span>
               </div>
             </template>
@@ -1087,6 +1165,7 @@ const handleRecentError = () => {
                     </template>
                   </button>
                 </div>
+                <div v-if="!selectedEngineEnabled" class="engine-config-warning engine-disabled-warning">该引擎已关闭：自动翻译、AI 检测/润色/命名与批量测试均不会调用；关闭状态不删除已保存配置。仍可手动「测试配置」、单组测试或获取模型（会真实请求，可能产生费用）。</div>
                 <div v-if="!officialEngineConfigured(selectedEngine)" class="engine-config-warning model-fetch-error">未配置完整凭据；该引擎会跳过，不发出翻译请求。</div>
                 <Transition name="test-fade">
                   <div
@@ -1187,7 +1266,7 @@ const handleRecentError = () => {
                 </template>
                 <template v-else-if="selectedEngine === 'thirdparty-ai'">
                   <div class="thirdparty-ai-config" style="margin-top: 0;">
-                    <p class="deepl-config-hint" style="margin-top: 0;">按组顺序逐一尝试，首组成功即停止；全部未成功才切换下一引擎。真实调用可能消耗额度并按组计时。</p>
+                    <p class="deepl-config-hint" style="margin-top: 0;">按组顺序逐一尝试，首组成功即停止；全部未成功才切换下一引擎。真实调用可能消耗额度并按组计时。<strong>自定义 AI 总开关关闭时，以下所有组都不参与自动翻译、AI 检测/润色/命名与批量测试；仅手动单组测试与拉取模型例外。</strong></p>
                     <div v-if="thirdpartyGroups.length === 0" class="group-empty">暂无自定义 AI 组，该引擎将被跳过。</div>
                     <div class="ai-group-list">
                       <div
@@ -1290,7 +1369,7 @@ const handleRecentError = () => {
                       />
                     </div>
                     <label class="deepl-config-label" style="margin-top: 10px;">通用系统提示词（适用于所有自定义 AI 组）</label>
-                    <textarea class="thirdparty-ai-prompt" :value="settings.thirdpartyAiSystemPrompt" @input="persistSetting('thirdpartyAiSystemPrompt', $event.target.value)" placeholder="可选。正式翻译时作为 system 消息发给每一组；user 消息仍是默认中英互译指令。留空不追加 system。不用于 uTools AI、润色或配置测试。" rows="3"></textarea>
+                    <textarea class="thirdparty-ai-prompt" :value="settings.thirdpartyAiSystemPrompt" @input="persistSetting('thirdpartyAiSystemPrompt', $event.target.value)" placeholder="可选。仅正式翻译时作为 system 消息发给每一组；user 消息仍是默认中英互译指令。留空不追加 system。不用于 uTools AI、语言检测、润色、AI 命名或配置测试。" rows="3"></textarea>
                     <p class="deepl-config-hint">兼容 OpenAI 协议（Bearer Key 认证）。API 链接只需填到 <code class="hint-code">/v1</code>，程序自动补全 <code class="hint-code">/chat/completions</code>。组测试与「测试配置」会真实请求，可能消耗额度，且不发送上述系统提示词、不计入成功率。</p>
                   </div>
                 </template>
@@ -1344,7 +1423,7 @@ const handleRecentError = () => {
           :aria-hidden="activeCategory === 'advanced' ? 'false' : 'true'"
         >
             <h3 class="section-title">稳定性统计</h3>
-            <p class="section-hint">记录每次翻译引擎实际调用的成功/失败，跳过（未配置、服务未加载或文本超限）单独计数且不计入成功率。与日志等级无关。</p>
+            <p class="section-hint">记录每次翻译引擎实际调用的成功/失败，跳过（未配置、服务未加载或文本超限）单独计数且不计入成功率。已关闭引擎不计入任何统计，历史记录保留。与日志等级无关。</p>
 
             <div class="stability-viewer">
               <div class="stability-viewer-header">
@@ -1363,6 +1442,7 @@ const handleRecentError = () => {
                     <span v-if="item.meta.icon" class="stability-engine-icon">{{ item.meta.icon }}</span>
                     <span v-else class="brand-badge" :class="item.meta.brandClass">{{ item.meta.brand }}</span>
                     <span class="stability-engine-name">{{ item.meta.name }}</span>
+                    <span v-if="!item.enabled" class="engine-card-off">已关闭</span>
                     <span class="stability-priority">P{{ index + 1 }}</span>
                   </div>
                   <div class="stability-row-right">
@@ -1766,15 +1846,143 @@ const handleRecentError = () => {
 .engine-card-info {
   flex: 1;
   display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  justify-content: center;
+  gap: 3px;
+  min-width: 0;
+}
+
+.engine-card-title {
+  display: flex;
   align-items: center;
   gap: 6px;
   min-width: 0;
+}
+
+.engine-card-meta {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  flex-wrap: wrap;
 }
 
 .engine-card-name {
   font-size: 13px;
   font-weight: 600;
   color: var(--text-primary, #1e293b);
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* 固定类型标签：AI / MT，分类由系统固定不可编辑 */
+.engine-kind-tag {
+  flex-shrink: 0;
+  font-size: 9px;
+  font-weight: 700;
+  letter-spacing: 0.4px;
+  padding: 1px 5px;
+  border-radius: 5px;
+  line-height: 1.5;
+}
+
+.engine-kind-tag.kind-ai {
+  color: #6d28d9;
+  background: rgba(139, 92, 246, 0.14);
+  border: 1px solid rgba(139, 92, 246, 0.35);
+}
+
+.engine-kind-tag.kind-mt {
+  color: #0f766e;
+  background: rgba(13, 148, 136, 0.12);
+  border: 1px solid rgba(13, 148, 136, 0.3);
+}
+
+.engine-primary-tag {
+  flex-shrink: 0;
+  font-size: 9px;
+  font-weight: 700;
+  padding: 1px 5px;
+  border-radius: 5px;
+  color: #4f46e5;
+  background: rgba(99, 102, 241, 0.12);
+  border: 1px solid rgba(99, 102, 241, 0.35);
+  line-height: 1.5;
+}
+
+.engine-card-off {
+  flex-shrink: 0;
+  font-size: 10px;
+  font-weight: 600;
+  color: var(--text-secondary, #64748b);
+  background: rgba(226, 232, 240, 0.7);
+  border: 1px solid rgba(203, 213, 224, 0.9);
+  padding: 1px 5px;
+  border-radius: 5px;
+  line-height: 1.5;
+}
+
+/* 关闭项：降低强调但仍可选中编辑，不靠颜色单独区分 */
+.engine-card.engine-disabled .engine-card-name {
+  opacity: 0.72;
+}
+
+.engine-card.engine-disabled {
+  background: rgba(241, 245, 249, 0.7);
+}
+
+/* 引擎开关：比配置开关紧凑，避免挤压卡片信息（提高特异性以覆盖后面的 .toggle-switch 基础样式） */
+.toggle-switch.engine-enable-toggle {
+  width: 38px;
+  height: 22px;
+  border-radius: 11px;
+  flex-shrink: 0;
+}
+
+.toggle-switch.engine-enable-toggle .toggle-slider {
+  top: 3px;
+  left: 3px;
+  width: 16px;
+  height: 16px;
+}
+
+.toggle-switch.engine-enable-toggle.active .toggle-slider {
+  transform: translateX(16px);
+}
+
+.engine-primary-summary {
+  display: flex;
+  align-items: baseline;
+  flex-wrap: wrap;
+  gap: 4px;
+  font-size: 12px;
+  color: var(--text-secondary, #64748b);
+  margin: -6px 0 10px 0;
+}
+
+.engine-primary-summary strong {
+  color: var(--text-primary, #1e293b);
+}
+
+.engine-primary-none {
+  color: #b45309 !important;
+}
+
+.engine-primary-hint {
+  font-size: 11px;
+  color: var(--text-secondary, #94a3b8);
+}
+
+.engine-disabled-hint {
+  color: #b45309;
+}
+
+.engine-disabled-warning {
+  color: #b45309;
+  border-color: rgba(251, 191, 36, 0.5);
+  background: #fffbeb;
 }
 
 .engine-card-unconfigured {
@@ -3224,6 +3432,53 @@ const handleRecentError = () => {
 
   .engine-card-name {
     color: var(--text-primary, #f1f5f9);
+  }
+
+  .engine-card.engine-disabled {
+    background: rgba(30, 41, 59, 0.55);
+  }
+
+  .engine-card.engine-disabled .engine-card-name {
+    opacity: 0.7;
+  }
+
+  .engine-kind-tag.kind-ai {
+    color: #c4b5fd;
+    background: rgba(139, 92, 246, 0.2);
+    border-color: rgba(139, 92, 246, 0.45);
+  }
+
+  .engine-kind-tag.kind-mt {
+    color: #5eead4;
+    background: rgba(13, 148, 136, 0.2);
+    border-color: rgba(45, 212, 191, 0.4);
+  }
+
+  .engine-primary-tag {
+    color: #a5b4fc;
+    background: rgba(99, 102, 241, 0.22);
+    border-color: rgba(99, 102, 241, 0.45);
+  }
+
+  .engine-card-off {
+    color: var(--text-secondary, #94a3b8);
+    background: rgba(51, 65, 85, 0.6);
+    border-color: rgba(71, 85, 105, 0.9);
+  }
+
+  .engine-primary-summary strong {
+    color: var(--text-primary, #f1f5f9);
+  }
+
+  .engine-primary-none,
+  .engine-disabled-hint {
+    color: #fcd34d !important;
+  }
+
+  .engine-disabled-warning {
+    color: #fcd34d;
+    border-color: rgba(251, 191, 36, 0.3);
+    background: rgba(146, 64, 14, 0.2);
   }
 
   .section-hint {

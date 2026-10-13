@@ -5,6 +5,7 @@
 
 export { buildChineseToEnglishPrompt } from './chineseToEnglish.js'
 export { buildEnglishToChinesePrompt } from './englishToChinese.js'
-export { buildPolishPrompt } from './polish.js'
+export { buildPolishPrompt, normalizePolishText } from './polish.js'
+export { buildLanguageDetectionPrompt, buildLanguageDetectionMessages, normalizeDetectionCode } from './languageDetection.js'
 // AI 变量命名使用独立协议与独立契约，不复用翻译提示词
 export { AI_NAMING_SYSTEM_CONTRACT, buildAiNamingPrompt, buildAiNamingMessages } from './aiNaming.js'

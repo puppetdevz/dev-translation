@@ -6,10 +6,21 @@ import ResultDisplay from './components/ResultDisplay.vue'
 import {
   buildChineseToEnglishPrompt,
   buildEnglishToChinesePrompt,
-  buildPolishPrompt
+  buildPolishPrompt,
+  normalizePolishText,
+  buildLanguageDetectionMessages,
+  normalizeDetectionCode,
 } from './prompts/index.js'
 import { useSettings } from './utils/useSettings.js'
 import { snapshotEngineTimeoutMs, snapshotThirdpartyAiTimeoutMs, snapshotGoogleProxy } from './utils/storage.js'
+import {
+  cloneEngineEnabled,
+  getEnabledAiSources,
+  getEnabledEngineOrder,
+  getPrimaryEnabledEngine,
+  rotateEnabledOrder,
+} from './utils/engineAvailability.js'
+import { runAiTaskFailover } from './utils/aiTaskFailover.js'
 import {
   runThirdpartyAiGroupFailover,
   snapshotThirdpartyAiGroups,
@@ -37,12 +48,12 @@ import {
   DICT_ENGINES,
   SKIP_REASON,
   PHASE,
+  NO_ENABLED_ENGINE_MESSAGE,
 } from './utils/engineBridge.js'
 import {
   AI_NAMING_STATUS,
   AI_NAMING_TOTAL_BUDGET_MS,
   exceedsAiNamingInputLimit,
-  filterAiNamingSources,
   runAiNaming,
 } from './utils/aiNaming.js'
 import { buildAiNamingMessages } from './prompts/aiNaming.js'
@@ -104,14 +115,33 @@ const detectLanguage = (text) => {
   return chineseRatio > 0.3 ? 'zh' : 'en'
 }
 
-// AI 语言检测
-const detectLanguageByAI = async (text) => {
-  const result = await window.utools.ai({
-    messages: [{ role: 'user', content: `只回复 "zh" 或 "en"，检测以下文本的语言：\n${text.slice(0, 300)}` }]
-  })
-  const content = (result && result.content && result.content.trim().toLowerCase()) || ''
-  return content.includes('zh') ? 'zh' : 'en'
+// 检测降级提示：只在当前有效轮次 AI 全部耗尽时提示一次，旧轮次不提示。
+const detectionNotice = ref('')
+let detectionNoticeTimer = null
+const showDetectionNotice = (message) => {
+  detectionNotice.value = message
+  if (detectionNoticeTimer) clearTimeout(detectionNoticeTimer)
+  detectionNoticeTimer = setTimeout(() => {
+    detectionNotice.value = ''
+    detectionNoticeTimer = null
+  }, 4000)
 }
+const clearDetectionNotice = () => {
+  if (detectionNoticeTimer) {
+    clearTimeout(detectionNoticeTimer)
+    detectionNoticeTimer = null
+  }
+  detectionNotice.value = ''
+}
+
+/** 辅助 AI 任务（检测/润色）启动时捕获的设置快照，只影响随后启动的操作。 */
+const aiTaskSettingsSnapshot = () => ({
+  engineEnabled: cloneEngineEnabled(settings.engineEnabled),
+  failoverOrder: Array.isArray(settings.failoverOrder) ? [...settings.failoverOrder] : [],
+  thirdpartyAiGroups: snapshotThirdpartyAiGroups(settings),
+  engineResponseTimeoutSeconds: settings.engineResponseTimeoutSeconds,
+  thirdpartyAiFailoverTimeoutSeconds: settings.thirdpartyAiFailoverTimeoutSeconds,
+})
 
 // 统一检测入口（AI 策略含 500ms 防抖）
 let detectionTimer = null
@@ -124,13 +154,64 @@ const runDetection = (text) => {
     const myVersion = ++detectionVersion
     detectionTimer = setTimeout(async () => {
       try {
-        const lang = await detectLanguageByAI(text)
-        // 仅当本次仍是最新检测时回填，否则丢弃（防止旧慢请求覆盖新结果）
-        if (myVersion === detectionVersion) {
-          detectedLanguage.value = lang
+        const snap = aiTaskSettingsSnapshot()
+        const outcome = await runAiTaskFailover({
+          sources: getEnabledAiSources(snap),
+          settings: snap,
+          messages: buildLanguageDetectionMessages(text),
+          validate: (raw) => {
+            const code = normalizeDetectionCode(raw)
+            return code ? { ok: true, value: code } : { ok: false }
+          },
+          timeoutMs: snapshotEngineTimeoutMs(snap),
+          groupTimeoutMs: snapshotThirdpartyAiTimeoutMs(snap),
+          isCurrent: () => myVersion === detectionVersion,
+          onAttempt: (payload) => {
+            if (payload.status === 'skipped') {
+              logger.warn(payload.source, 'AI 语言检测来源跳过', {
+                category: payload.category,
+                skipReason: payload.skipReason,
+                skipCategory: payload.skipCategory,
+                phase: PHASE.SKIP,
+                requestId: myVersion,
+                groupId: payload.groupId,
+              })
+              return
+            }
+            if (payload.status === 'failure') {
+              logger.warn(payload.source, 'AI 语言检测失败', {
+                category: payload.category,
+                phase: payload.phase,
+                requestId: myVersion,
+                groupId: payload.groupId,
+              })
+            }
+          },
+        })
+        // 仅当前轮次有效时才回填；旧轮次不提示、不覆盖
+        if (myVersion !== detectionVersion) return
+        if (outcome.stale) return
+        if (outcome.success) {
+          detectedLanguage.value = outcome.value
+          return
         }
+        // 无开启 AI 来源或全部耗尽：当前轮次只提示一次，回退本地字符规则；不修改保存的检测策略
+        detectedLanguage.value = detectLanguage(text)
+        showDetectionNotice('AI 语言检测不可用，已按本地规则判断方向')
+        logger.warn('ai', 'AI 语言检测降级', {
+          category: 'unknown',
+          phase: PHASE.FALLBACK,
+          requestId: myVersion,
+        })
       } catch (err) {
-        logger.warn('ai', 'AI 语言检测失败', { category: 'unknown', phase: 'call' })
+        if (myVersion !== detectionVersion) return
+        detectedLanguage.value = detectLanguage(text)
+        showDetectionNotice('AI 语言检测不可用，已按本地规则判断方向')
+        logger.warn('ai', 'AI 语言检测降级', {
+          category: 'unknown',
+          phase: PHASE.FALLBACK,
+          requestId: myVersion,
+        })
       }
     }, 500)
   } else {
@@ -144,6 +225,7 @@ const cancelDetection = () => {
     clearTimeout(detectionTimer)
     detectionTimer = null
   }
+  clearDetectionNotice()
   detectionVersion++ // 让任何 inflight AI 检测回调失效
 }
 
@@ -151,7 +233,8 @@ const cancelDetection = () => {
 const handleLanguageToggle = () => {
   detectedLanguage.value = detectedLanguage.value === 'zh' ? 'en' : 'zh'
   isManualOverride.value = true
-  // 方向变化：旧资料补全与旧 AI 命名立即失效
+  // 方向变化：旧资料补全、旧 AI 命名与旧润色结果均失效
+  polishVersion++
   resetDictionaryState()
   clearAiNamingState()
 }
@@ -160,7 +243,8 @@ const handleLanguageToggle = () => {
 const handleLanguageRedetect = () => {
   isManualOverride.value = false
   cancelDetection()
-  // 重新识别会改变方向，旧资料和旧命名都不能继续代表当前结果
+  // 重新识别会改变方向，旧资料、旧命名与旧润色结果都不能继续代表当前状态
+  polishVersion++
   resetDictionaryState()
   clearAiNamingState()
   runDetection(inputText.value)
@@ -625,6 +709,7 @@ const aiNamingSnapshotKey = (snapshot, settingsSnap) => JSON.stringify([
   snapshot && snapshot.translation,
   snapshot && snapshot.engine,
   settingsSnap.failoverOrder,
+  settingsSnap.engineEnabled,
   settingsSnap.thirdpartyAiGroups,
 ])
 
@@ -665,6 +750,7 @@ const startAiNaming = async (snapshot) => {
 
   const settingsSnap = {
     failoverOrder: Array.isArray(settings.failoverOrder) ? [...settings.failoverOrder] : [],
+    engineEnabled: cloneEngineEnabled(settings.engineEnabled),
     thirdpartyAiGroups: snapshotThirdpartyAiGroups(settings),
     thirdpartyAiFailoverTimeoutSeconds: settings.thirdpartyAiFailoverTimeoutSeconds,
   }
@@ -687,7 +773,7 @@ const startAiNaming = async (snapshot) => {
   aiNamingWords.value = []
   aiNamingMessage.value = ''
 
-  const sources = filterAiNamingSources(settingsSnap.failoverOrder)
+  const sources = getEnabledAiSources(settingsSnap)
   const result = await runAiNaming({
     sources,
     settings: settingsSnap,
@@ -760,6 +846,16 @@ const translate = async () => {
     return
   }
 
+  // 有效顺序在启动时快照：合法全关时明确无引擎，不发任何请求、不隐式恢复 uTools AI
+  const order = getEnabledEngineOrder(settings)
+  if (order.length === 0) {
+    isLoading.value = false
+    translationResult.value = null
+    usedEngine.value = ''
+    error.value = NO_ENABLED_ENGINE_MESSAGE
+    return
+  }
+
   isLoading.value = true
   error.value = ''
   translationResult.value = null
@@ -778,13 +874,11 @@ const translate = async () => {
   const myRequestId = ++translateRequestId
 
   try {
-    const order = (settings.failoverOrder && Array.isArray(settings.failoverOrder) && settings.failoverOrder.length > 0)
-      ? [...settings.failoverOrder]
-      : ['ai']
     const timeoutMs = snapshotEngineTimeoutMs(settings)
     const settingsSnap = {
       ...settings,
-      failoverOrder: order,
+      failoverOrder: [...order],
+      engineEnabled: cloneEngineEnabled(settings.engineEnabled),
       thirdpartyAiGroups: snapshotThirdpartyAiGroups(settings),
       thirdpartyAiSystemPrompt: settings.thirdpartyAiSystemPrompt || '',
       thirdpartyAiFailoverTimeoutSeconds: settings.thirdpartyAiFailoverTimeoutSeconds,
@@ -916,7 +1010,10 @@ const dismissFallbackNotice = () => {
   fallbackNotice.value = ''
 }
 
-// 润色函数
+// 润色版本：清空/改输入/切方向/离页/新轮次都会让旧响应失效
+let polishVersion = 0
+
+// 润色函数：使用开启的 AI 来源按优先级回退，任务专用校验；失败不自动替换输入
 const polish = async () => {
   if (!inputText.value || !inputText.value.trim()) {
     error.value = '请输入要润色的内容'
@@ -930,26 +1027,63 @@ const polish = async () => {
 
   isPolishing.value = true
   error.value = ''
+  const myVersion = ++polishVersion
+  const sourceText = inputText.value
+  const lang = detectLanguage(sourceText)
 
   try {
-    const lang = detectLanguage(inputText.value)
-    const prompt = buildPolishPrompt(inputText.value, lang)
-
-    const result = await window.utools.ai({
-      messages: [{ role: 'user', content: prompt }]
+    const snap = aiTaskSettingsSnapshot()
+    const outcome = await runAiTaskFailover({
+      sources: getEnabledAiSources(snap),
+      settings: snap,
+      messages: [{ role: 'user', content: buildPolishPrompt(sourceText, lang) }],
+      validate: (raw) => {
+        const text = normalizePolishText(raw)
+        return text ? { ok: true, value: text } : { ok: false }
+      },
+      timeoutMs: snapshotEngineTimeoutMs(snap),
+      groupTimeoutMs: snapshotThirdpartyAiTimeoutMs(snap),
+      isCurrent: () => myVersion === polishVersion,
+      onAttempt: (payload) => {
+        if (payload.status === 'skipped') {
+          logger.warn(payload.source, '文本润色来源跳过', {
+            category: payload.category,
+            skipReason: payload.skipReason,
+            skipCategory: payload.skipCategory,
+            phase: PHASE.SKIP,
+            requestId: myVersion,
+            groupId: payload.groupId,
+          })
+          return
+        }
+        if (payload.status === 'failure') {
+          logger.warn(payload.source, '文本润色失败', {
+            category: payload.category,
+            phase: payload.phase,
+            requestId: myVersion,
+            groupId: payload.groupId,
+          })
+        }
+      },
     })
-
-    // 清理可能的 markdown 代码块
-    let polished = result.content.trim()
-    polished = polished.replace(/^```[\w]*\n/, '').replace(/\n```$/, '')
-
-    originalText.value = inputText.value
-    polishedText.value = polished
+    if (myVersion !== polishVersion) return
+    if (outcome.stale) return
+    if (!outcome.success) {
+      // 全部耗尽：提示一次，保留原输入，不产出伪造结果
+      logger.error('ai', '文本润色失败', { category: 'unknown', phase: PHASE.FALLBACK, requestId: myVersion })
+      error.value = '润色失败，请重试'
+      return
+    }
+    // 结果回填前再确认输入与方向未变，旧结果不覆盖新状态
+    if (inputText.value !== sourceText || detectLanguage(inputText.value) !== lang) return
+    originalText.value = sourceText
+    polishedText.value = outcome.value
   } catch (err) {
+    if (myVersion !== polishVersion) return
     logger.error('ai', '文本润色失败', { category: 'unknown', phase: PHASE.CALL })
     error.value = '润色失败，请重试'
   } finally {
-    isPolishing.value = false
+    if (myVersion === polishVersion) isPolishing.value = false
   }
 }
 
@@ -981,22 +1115,27 @@ const toggleVariableNaming = () => {
   toggleSetting('showVariableNaming')
 }
 
-// Footer 快捷切换可循环的引擎顺序（与 SettingsPage 拖拽可配置范围保持一致）
-const FOOTER_ENGINE_CYCLE = ['ai', 'thirdparty-ai', 'google', 'deepl', 'deeplx', 'baidu', 'aliyun', 'caiyun']
+// 有效主引擎：首个开启项；全部关闭时为 null（不隐式回退 uTools AI）
+const mainEngine = computed(() => getPrimaryEnabledEngine(settings))
+
+// 快捷切换：只轮换开启项，关闭项保持原位与相对次序，不因轮换被启用
+const openSettingsEngine = () => {
+  router.push({ name: 'settings', query: { category: 'engine' } })
+}
 
 const toggleTranslationEngine = () => {
-  const order = (settings.failoverOrder && settings.failoverOrder.length) ? [...settings.failoverOrder] : ['ai']
-  const current = order[0]
-  const nextIndex = (FOOTER_ENGINE_CYCLE.indexOf(current) + 1) % FOOTER_ENGINE_CYCLE.length
-  const next = FOOTER_ENGINE_CYCLE[nextIndex]
-  // 移除已存在的 next，再插入首位
-  const filtered = order.filter(e => e !== next)
-  const newOrder = [next, ...filtered]
-  updateSetting('failoverOrder', newOrder)
+  const { order, changed } = rotateEnabledOrder(settings)
+  if (!order.length || !changed) {
+    // 无开启项：不进设置页的引擎分类，不伪装成 uTools 主引擎
+    if (getEnabledEngineOrder(settings).length === 0) openSettingsEngine()
+    return
+  }
+  updateSetting('failoverOrder', order)
 }
 
 // 主引擎 → 简短标签（用于 footer 按钮显示文案，紧凑空间用缩短前缀）
 const mainEngineShortLabel = (main) => {
+  if (!main) return '无启用'
   if (main === 'google') return 'Google'
   if (main === 'deepl') return 'DeepL'
   if (main === 'deeplx') return 'DeepLX'
@@ -1025,7 +1164,8 @@ const usedEngineLabel = computed(() => {
 })
 
 const engineLabel = computed(() => {
-  const main = (settings.failoverOrder && settings.failoverOrder[0]) || 'ai'
+  const main = mainEngine.value
+  if (!main) return '无启用引擎，点击前往设置开启'
   if (main === 'google') return 'Google 翻译引擎模式'
   if (main === 'deepl') return 'DeepL 翻译引擎模式'
   if (main === 'deeplx') return 'DeepLX 翻译引擎模式'
@@ -1046,8 +1186,9 @@ const handleClear = () => {
   inputText.value = ''
   // 取消挂起的检测定时器与 inflight AI 检测，防止清空后回填 detectedLanguage
   cancelDetection()
-  // 让进行中的翻译请求失效，防止其完成后回填已清空的 translationResult
+  // 让进行中的翻译/润色请求失效，防止其完成后回填已清空的 translationResult
   translateRequestId++
+  polishVersion++
   translationResult.value = null
   error.value = ''
   detectedLanguage.value = ''
@@ -1075,9 +1216,10 @@ watch(inputText, (newValue) => {
     // 注意：不在 watch 中提前 detectInputType —— 该值仅在 translate 时被消费（translateWithX 内部统一设置），
     // 此处提前计算每次按键都同步跑多正则是浪费；ResultDisplay 也仅在 result 存在时才读取 inputType
   } else {
-    // 输入为空时，重置所有状态，并使进行中的翻译请求失效，避免旧结果回填
+    // 输入为空时，重置所有状态，并使进行中的翻译/润色请求失效，避免旧结果回填
     cancelDetection()
     translateRequestId++
+    polishVersion++
     isManualOverride.value = false
     detectedLanguage.value = ''
     inputType.value = 'word'
@@ -1092,8 +1234,9 @@ watch(inputText, (newValue) => {
   }
 })
 
-// 输入变化：旧资料补全与旧 AI 命名失效（不在输入过程中实时请求命名）
+// 输入变化：旧资料补全、旧 AI 命名与旧润色结果失效（不在输入过程中实时请求命名）
 watch(inputText, () => {
+  polishVersion++
   resetDictionaryState()
   clearAiNamingState()
 })
@@ -1148,6 +1291,7 @@ onUnmounted(() => {
     fallbackTimer = null
   }
   translateRequestId++ // 让任何 inflight 翻译完成后丢弃结果
+  polishVersion++ // 让 inflight 润色丢弃回填
   dictionaryRequestVersion++ // 让 inflight 词典补全丢弃回填
   clearDictionaryTimer()
   aiNamingVersion++ // 让 inflight AI 命名丢弃回填
@@ -1166,6 +1310,7 @@ onUnmounted(() => {
           :isPolishing="isPolishing"
           :polishedText="polishedText"
           :usedEngineLabel="usedEngineLabel"
+          :detectionNotice="detectionNotice"
           @translate="translate"
           @clear="handleClear"
           @polish="polish"
@@ -1203,11 +1348,11 @@ onUnmounted(() => {
       <div class="footer-left">
         <button
           class="engine-toggle-btn"
-          :class="{ active: settings.failoverOrder && settings.failoverOrder[0] && settings.failoverOrder[0] !== 'ai' }"
+          :class="{ active: !!mainEngine && mainEngine !== 'ai' }"
           @click="toggleTranslationEngine"
           :aria-label="engineLabel"
         >
-          <span>{{ mainEngineShortLabel((settings.failoverOrder && settings.failoverOrder[0]) || 'ai') }}</span>
+          <span>{{ mainEngineShortLabel(mainEngine) }}</span>
         </button>
         <button
           class="var-naming-btn"

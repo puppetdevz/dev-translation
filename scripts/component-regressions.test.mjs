@@ -73,3 +73,51 @@ describe('翻译请求晚到保护', () => {
     assert.match(teardown, /translateRequestId\s*\+\+/)
   })
 })
+
+describe('引擎开关接入回归', () => {
+  it('设置页引擎行提供独立开关、固定类型标签与有效主引擎标识', () => {
+    const card = between(settingsPage, 'class="engine-card"', 'class="engine-priority"')
+    assert.match(card, /engine-enable-toggle/)
+    assert.match(card, /@click\.stop="toggleEngineEnabled\(engine\)"/)
+    assert.match(card, /aria-pressed/)
+    assert.match(card, /engine-kind-tag/)
+    assert.match(card, /主引擎/)
+    assert.match(settingsPage, /engine-disabled-warning/)
+    assert.match(settingsPage, /无启用引擎/)
+  })
+
+  it('开关拖动不得进入卡片拖拽排序', () => {
+    const dragStart = between(settingsPage, 'const onDragStart =', 'const onDragOver =')
+    assert.match(dragStart, /engine-enable-toggle/)
+    assert.match(dragStart, /preventDefault\(\)/)
+  })
+
+  it('全部关闭时批量测试与保存失败文案符合约定', () => {
+    const probe = between(settingsPage, 'const runBatchProbe =', 'const dragIndex =')
+    assert.match(probe, /getEnabledEngineOrder\(settings\)\.length === 0/)
+    assert.match(probe, /NO_ENABLED_ENGINE_MESSAGE/)
+    assert.match(settingsPage, /保存失败，重启后可能恢复原状态/)
+  })
+
+  it('翻译页按有效顺序启动，全关不发请求', () => {
+    const translateFn = between(translatePage, 'const translate = async () =>', 'const dismissFallbackNotice =')
+    assert.match(translateFn, /getEnabledEngineOrder\(settings\)/)
+    assert.match(translateFn, /NO_ENABLED_ENGINE_MESSAGE/)
+    assert.match(translateFn, /order\.length === 0/)
+  })
+
+  it('检测与润色走共享辅助 AI 回退并做版本保护', () => {
+    assert.match(translatePage, /runAiTaskFailover/)
+    assert.match(translatePage, /buildLanguageDetectionMessages/)
+    assert.match(translatePage, /polishVersion/)
+    assert.match(translatePage, /getEnabledAiSources/)
+  })
+
+  it('快捷轮换只动开启项，全关时进入设置的引擎分类', () => {
+    const toggle = between(translatePage, 'const toggleTranslationEngine =', '// 主引擎 → 简短标签')
+    assert.match(toggle, /rotateEnabledOrder/)
+    assert.match(toggle, /openSettingsEngine\(\)/)
+    const opener = between(translatePage, 'const openSettingsEngine =', 'const toggleTranslationEngine =')
+    assert.match(opener, /category: 'engine'/)
+  })
+})

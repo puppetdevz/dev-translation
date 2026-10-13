@@ -10,8 +10,17 @@ import {
   cloneGroups,
   stripLegacyThirdpartyAiFields,
 } from './thirdpartyAiGroups.js'
+import {
+  KNOWN_ENGINES,
+  defaultEngineEnabled,
+  normalizeEngineEnabled,
+  cloneEngineEnabled,
+} from './engineAvailability.js'
 
 const STORAGE_KEY = 'dev-translation-settings'
+
+// 引擎白名单由 engineAvailability 统一维护，这里保持旧导出路径兼容。
+export { KNOWN_ENGINES }
 
 export const ENGINE_RESPONSE_TIMEOUT_MIN = 1
 export const ENGINE_RESPONSE_TIMEOUT_MAX = 60
@@ -121,6 +130,7 @@ function cloneSettings(settings) {
   if (Array.isArray(settings.failoverOrder)) {
     next.failoverOrder = [...settings.failoverOrder]
   }
+  next.engineEnabled = cloneEngineEnabled(settings.engineEnabled)
   next.thirdpartyAiGroups = cloneGroups(settings.thirdpartyAiGroups || [])
   stripLegacyThirdpartyAiFields(next)
   return next
@@ -136,8 +146,9 @@ export const DEFAULT_SETTINGS = {
   showAiNaming: false,          // AI 命名（新增；默认关闭，独立于常规命名，依赖已有 AI 来源并会额外联网消耗额度）
   showContextNote: true,        // 显示上下文说明
   detectionStrategy: 'regex',   // 语言检测策略: 'regex' | 'ai'
-  translationEngine: 'ai',     // 主翻译引擎（兼容旧版本，实际主引擎由 failoverOrder[0] 决定）
+  translationEngine: 'ai',     // 主翻译引擎（仅作旧配置迁移参考；实际有效主引擎 = failoverOrder 中首个 engineEnabled 为 true 的项）
   failoverOrder: ['ai', 'thirdparty-ai', 'google', 'deepl', 'deeplx', 'baidu', 'aliyun', 'caiyun'], // 自动故障转移顺序: 所有引擎的有序列表，首位为主引擎，翻译失败时按此顺序依次重试。deepl=官方 API，deeplx=自部署/公共实例；新增官方引擎追加在旧五引擎之后
+  engineEnabled: defaultEngineEnabled(), // 八类引擎持久化总开关映射（{engine: boolean}）；显式 false 保留、缺键/非法值按 true，全 false 合法且不视为缺失
   engineResponseTimeoutSeconds: ENGINE_RESPONSE_TIMEOUT_DEFAULT, // 每个已调用翻译引擎取得主译文的时限（秒），超时视为失败并尝试下一引擎
   deeplApiKey: '',              // DeepL 官方 API Key（Free 版以 :fx 结尾，注册地址 https://www.deepl.com/pro-api）
   deeplxServerUrl: '',          // DeepLX 服务器地址（如 http://localhost:1188）
@@ -180,9 +191,6 @@ export function normalizeBooleanSettings(settings) {
   return settings
 }
 
-
-// 已知引擎白名单：loadSettings 会用它过滤 failoverOrder，剔除未知/废弃的引擎标识，防止渲染时 engineMeta[engine] 为 undefined 致白屏
-export const KNOWN_ENGINES = ['ai', 'thirdparty-ai', 'google', 'deepl', 'deeplx', 'baidu', 'aliyun', 'caiyun']
 
 // 升级时仅把缺失的新引擎按该顺序补到末尾，不打乱用户已有相对顺序
 export const APPENDED_ENGINES = ['baidu', 'aliyun', 'caiyun']
@@ -278,6 +286,8 @@ export const loadSettings = () => {
       }
       // 升级补全：保留原主引擎与相对顺序，仅把缺失的百度/阿里/彩云按固定顺序追加末尾；去重保持幂等
       merged.failoverOrder = appendMissingEngines(merged.failoverOrder, APPENDED_ENGINES)
+      // 引擎启停映射：逐项独立规范化，显式 false 保留、缺键/非法值按 true，全 false 合法（不得当成缺失恢复默认）
+      merged.engineEnabled = normalizeEngineEnabled(merged.engineEnabled)
       merged.engineResponseTimeoutSeconds = normalizeEngineResponseTimeoutSeconds(
         merged.engineResponseTimeoutSeconds
       )
@@ -319,6 +329,7 @@ export const saveSettings = (settings) => {
     if (Array.isArray(settings && settings.thirdpartyAiGroups)) {
       payload.thirdpartyAiGroups = cloneGroups(settings.thirdpartyAiGroups)
     }
+    payload.engineEnabled = normalizeEngineEnabled(payload.engineEnabled)
     normalizeBooleanSettings(payload)
     payload.engineResponseTimeoutSeconds = normalizeEngineResponseTimeoutSeconds(
       payload.engineResponseTimeoutSeconds
